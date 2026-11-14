@@ -1,0 +1,7 @@
+[watch]
+# rad-demo depends on rad-core and rad-backend-web; without this trunk
+# only notices edits inside crates/rad-demo itself.
+watch = ["../rad-core", "../rad-backend-web"]
+
+[serve]
+open = false

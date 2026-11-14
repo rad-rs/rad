@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rad designer</title>
+<link data-trunk rel="rust" />
+<style>
+  body { margin: 0; font-family: sans-serif; background: #f3f3f3; display: flex; height: 100vh; }
+  #bar { position: absolute; top: 0; left: 0; right: 0; padding: 8px 12px; background: #222; color: #fff; font: 13px sans-serif; }
+
+  #palette { width: 140px; margin: 44px 0 0 0; padding: 12px; background: #e8e8e8; border-right: 1px solid #ccc; }
+  #palette h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0 0 8px; }
+  .palette-item {
+    display: block; padding: 4px 14px; margin-bottom: 6px; background: #e1e1e1;
+    border: 1px solid #adadad; border-radius: 2px; cursor: grab;
+    font: 13px "Segoe UI", sans-serif;
+  }
+
+  #rad-stage { flex: 1; position: relative; margin: 44px 16px 0; }
+
+  .rad-window {
+    border: 1px solid #555;
+    background: #fff;
+    min-width: 160px;
+    min-height: 120px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  }
+  .rad-window-titlebar {
+    background: #2b579a; color: #fff; font: 13px "Segoe UI", sans-serif;
+    padding: 4px 8px; user-select: none;
+  }
+  .rad-window-body { position: relative; }
+  .rad-window-body button {
+    position: absolute; font-family: "Segoe UI", sans-serif;
+    border: 1px solid #adadad; background: #e1e1e1; border-radius: 2px;
+    cursor: move; user-select: none; touch-action: none;
+  }
+  .rad-window-body > span {
+    position: absolute; font-family: "Segoe UI", sans-serif; font-size: 13px;
+    cursor: move; user-select: none; touch-action: none;
+  }
+  .rad-window-body .rad-checkbox {
+    position: absolute; display: inline-flex; align-items: center; gap: 4px;
+    font-family: "Segoe UI", sans-serif; font-size: 13px;
+    cursor: move; user-select: none; touch-action: none;
+  }
+
+  /* Design-time selection: dashed box + 8 handles, VS-style. Purely
+     visual for now — pointer-events:none so it never blocks clicks or
+     the drag-to-reposition behavior on whatever it's drawn over. */
+  .rad-selection {
+    position: absolute;
+    display: none;
+    border: 1px dashed #0078d7;
+    pointer-events: none;
+  }
+  .rad-selection.visible { display: block; }
+  .rad-handle {
+    position: absolute;
+    width: 6px; height: 6px;
+    background: #fff;
+    border: 1px solid #0078d7;
+    /* Re-enable events: the overlay itself is pointer-events:none so it
+       doesn't block clicks on what's selected, but the handles need to
+       receive pointerdown/move/up to drive resizing. */
+    pointer-events: auto;
+  }
+  .rad-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
+  .rad-handle.n  { left: 50%; top: -4px; margin-left: -3px; cursor: ns-resize; }
+  .rad-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
+  .rad-handle.e  { right: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+  .rad-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+  .rad-handle.s  { left: 50%; bottom: -4px; margin-left: -3px; cursor: ns-resize; }
+  .rad-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+  .rad-handle.w  { left: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+
+  #properties { width: 180px; margin: 44px 0 0 0; padding: 12px; background: #e8e8e8; border-left: 1px solid #ccc; }
+  #properties h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0 0 8px; }
+  .prop-row { margin-bottom: 8px; }
+  .prop-row label { display: block; font: 11px "Segoe UI", sans-serif; color: #555; margin-bottom: 2px; }
+  .prop-row input {
+    width: 100%; box-sizing: border-box; padding: 3px 5px;
+    font: 12px "Segoe UI", sans-serif; border: 1px solid #adadad;
+  }
+  .prop-row input:disabled { background: #ddd; color: #888; }
+  .prop-row.hidden { display: none; }
+
+  #output-panel { width: 420px; margin: 44px 16px 0 0; display: flex; flex-direction: column; }
+  #output-panel button { margin-bottom: 8px; padding: 6px 12px; align-self: flex-start; }
+  #generated-code { flex: 1; font: 12px "Consolas", monospace; padding: 8px; }
+</style>
+</head>
+<body>
+<div id="bar">rad-designer — drag a control onto the form, then Save to generate form1.designer.rs</div>
+
+<div id="palette">
+  <h3>Toolbox</h3>
+  <div class="palette-item" data-kind="Button" draggable="true">Button</div>
+  <div class="palette-item" data-kind="Label" draggable="true">Label</div>
+  <div class="palette-item" data-kind="CheckBox" draggable="true">CheckBox</div>
+</div>
+
+<div id="rad-stage"></div>
+
+<div id="properties">
+  <h3>Properties</h3>
+  <div class="prop-row" id="row-name"><label>Name</label><input id="prop-name" readonly /></div>
+  <div class="prop-row" id="row-text"><label>Text</label><input id="prop-text" /></div>
+  <div class="prop-row" id="row-x"><label>X</label><input id="prop-x" type="number" /></div>
+  <div class="prop-row" id="row-y"><label>Y</label><input id="prop-y" type="number" /></div>
+  <div class="prop-row" id="row-width"><label>Width</label><input id="prop-width" type="number" /></div>
+  <div class="prop-row" id="row-height"><label>Height</label><input id="prop-height" type="number" /></div>
+  <div class="prop-row" id="row-checked">
+    <label><input id="prop-checked" type="checkbox" style="width:auto;" /> Checked</label>
+  </div>
+</div>
+
+<div id="output-panel">
+  <button id="save-button">Save (generate form1.designer.rs)</button>
+  <textarea id="generated-code" readonly placeholder="Generated Rust appears here after Save."></textarea>
+</div>
+</body>
+</html>
