@@ -27,13 +27,26 @@ The designer needs cross-origin isolation (it registers `coi-serviceworker.js`) 
 The designer can compile the form you are editing without a server:
 
 - **Web app:** runs `rustc` (compiled to WebAssembly) in a worker and produces a `.wasm` for the browser backend.
-- **Windows `.exe`:** the same wasm-hosted `rustc` links a real Windows PE through its in-process LLD.
+- **Windows `.exe`:** the same wasm-hosted `rustc` links a real Windows PE through its in-process LLD. A selector next to **Build native .exe** chooses **64-bit** (`x86_64-pc-windows-gnu`, downloads `form1.exe`) or **32-bit** (`i686-pc-windows-gnu`, downloads `form1-x86.exe`).
 
-All of `rad-core` and the backend are mounted as sibling `mod` files of a single crate, because that toolchain has no Cargo and cannot produce `.rlib`s.
+All of `rad-core` and the backend are mounted as sibling `mod` files of a single crate, because that toolchain has no Cargo and cannot produce `.rlib`s. `rad-backend-win32` has no dependencies and builds for both architectures from the same source.
 
 ### Toolchain is not in this repo
 
-The native `.exe` build needs a patched wasm-hosted `rustc` (about 100 MB), a matching Windows sysroot and MinGW runtime files, expected under `crates/rad-designer/native-toolchain/`. They are ignored by git. See [rad-rs/wasm-rustc-windows](https://github.com/rad-rs/wasm-rustc-windows) for how they are produced. The web-app build downloads its toolchain from a public host on first use and caches it in the browser.
+The native `.exe` build needs a patched wasm-hosted `rustc` (about 220 MB) plus a Windows standard library and MinGW runtime per architecture, expected under `crates/rad-designer/native-toolchain/` (ignored by git):
+
+```
+native-toolchain/
+  rustc_opt.wasm                  the compiler, shared by both targets
+  x86_64-pc-windows-gnu/          and the same again for i686-pc-windows-gnu/
+    crt2.o                        MinGW C runtime start-up object
+    mingw-libs/*.a, index.json    import libraries + libgcc; index.json lists their stems
+    sysroot/*.rlib, *.rmeta,      the target's standard library (each .rlib needs its
+      rsbegin.o, rsend.o,         .rmeta next to it) and a manifest of the rlib stems
+      index.json
+```
+
+[rad-rs/wasm-rustc-windows](https://github.com/rad-rs/wasm-rustc-windows) builds the compiler and has `scripts/assemble-designer-toolchain.sh`, which writes exactly this layout. A missing file fails the build with its name. The web-app build downloads its toolchain from a public host on first use and caches it in the browser.
 
 ## Status
 

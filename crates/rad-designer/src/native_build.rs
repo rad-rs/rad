@@ -66,8 +66,9 @@ pub fn build_native_mount_files(main_rs: &str, form1_rs: &str, form1_designer_rs
 /// `Win32Backend` only ever creates the window; nothing runs it without
 /// one, the same role `rad-demo-native`'s hand-written entry point plays
 /// for the real `rad-backend-win32`. `GetMessageW`'s `MSG` out-param is
-/// declared here as an oversized, correctly-aligned `[usize; 7]` (48
-/// bytes needed, 56 given) rather than a proper struct — harmless since
+/// declared here as a correctly-aligned `[usize; 7]` (56 bytes on 64-bit
+/// where 48 are needed; on 32-bit exactly the 28 needed) rather than a
+/// proper struct — harmless since
 /// the OS only ever writes within the real struct's bounds, and it
 /// means this entry point needs no FFI declarations beyond what it
 /// calls directly, matching the point of mounting source instead of

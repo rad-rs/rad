@@ -95,7 +95,7 @@ mod native_build_pipeline {
     #[wasm_bindgen(module = "/native-build-pipeline.js")]
     extern "C" {
         #[wasm_bindgen(js_name = buildNativeApp, catch)]
-        pub async fn build_native_app(files: &Map, on_progress: &JsValue) -> Result<JsValue, JsValue>;
+        pub async fn build_native_app(files: &Map, triple: &str, on_progress: &JsValue) -> Result<JsValue, JsValue>;
     }
 }
 
@@ -1359,9 +1359,18 @@ fn trigger_download_bytes(document: &Document, filename: &str, content: &[u8]) {
 /// `native_build_pipeline` for the rest of this path.
 async fn run_native_build(chrome: Document, window: Rc<WebWindow>) {
     let status: HtmlElement = chrome_element(&chrome, "build-status");
-    status.set_text_content(Some("Building native .exe..."));
+    // `#native-arch-select`'s values are the rustc target triples the
+    // toolchain serves (see `NATIVE_TARGETS` in `native-build-pipeline.js`).
+    let triple = chrome_element::<HtmlSelectElement>(&chrome, "native-arch-select").value();
+    let (arch_label, exe_name) = if triple.starts_with("i686") {
+        ("32-bit", "form1-x86.exe")
+    } else {
+        ("64-bit", "form1.exe")
+    };
+    let starting = format!("Building native {arch_label} .exe...");
+    status.set_text_content(Some(&starting));
     open_console(&chrome);
-    log_console(&chrome, "Building native .exe...");
+    log_console(&chrome, &starting);
 
     let form1_rs = files::read("form1.rs").unwrap_or_else(initial_form1_rs);
     let form1_designer_rs = files::read("form1.designer.rs").unwrap_or_default();
@@ -1382,15 +1391,16 @@ async fn run_native_build(chrome: Document, window: Rc<WebWindow>) {
             log_console(&chrome, &message);
         }) as Box<dyn FnMut(String)>)
     };
-    let result = native_build_pipeline::build_native_app(&mount, on_progress.as_ref()).await;
+    let result = native_build_pipeline::build_native_app(&mount, &triple, on_progress.as_ref()).await;
     drop(on_progress);
 
     match result {
         Ok(value) => {
             let bytes = js_sys::Uint8Array::new(&value).to_vec();
-            status.set_text_content(Some("Downloading form1.exe..."));
-            log_console(&chrome, "Downloading form1.exe...");
-            trigger_download_bytes(&chrome, "form1.exe", &bytes);
+            let downloading = format!("Downloading {exe_name}...");
+            status.set_text_content(Some(&downloading));
+            log_console(&chrome, &downloading);
+            trigger_download_bytes(&chrome, exe_name, &bytes);
             status.set_text_content(Some("Build complete."));
             log_console(&chrome, "Build complete.");
         }

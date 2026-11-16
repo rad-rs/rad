@@ -23,7 +23,12 @@ import {
 import { WASIFarm } from "/vendor/browser_wasi_shim_threads/browser-wasi-shim-threads.es.js";
 
 const TOOLCHAIN_BASE = "/native-toolchain/";
-const CACHE_NAME = "rad-native-build-toolchain-v2";
+const CACHE_NAME = "rad-native-build-toolchain-v3";
+
+/** Targets a toolchain can serve. The compiler (`rustc_opt.wasm`) is shared;
+ *  everything target-specific lives in `native-toolchain/<triple>/`:
+ *  `crt2.o`, `mingw-libs/` and `sysroot/`, each with `index.json` manifests. */
+export const NATIVE_TARGETS = ["x86_64-pc-windows-gnu", "i686-pc-windows-gnu"];
 
 async function cachedFetch(url, onProgress) {
   const cache = await caches.open(CACHE_NAME);
@@ -66,52 +71,56 @@ function runWorker(farmRef, rustcWasmBytes, args) {
 /** A toolchain lists its own files in `index.json` manifests (an array of
  *  file stems): which crates make up the sysroot, and which import
  *  libraries the linker may ask for, depend on the compiler version. */
-async function fetchManifest(path) {
-  const response = await fetch(`${TOOLCHAIN_BASE}${path}`);
-  if (!response.ok) throw new Error(`toolchain is missing ${path} (HTTP ${response.status})`);
+async function fetchManifest(base, path) {
+  const response = await fetch(`${base}${path}`);
+  if (!response.ok) throw new Error(`toolchain is missing ${base}${path} (HTTP ${response.status})`);
   return response.json();
 }
 
 /**
  * Compiles `files` (a `Map`/plain-object of mount path -> source text,
- * rooted at `/main.rs`) to a native `x86_64-pc-windows-gnu` `.exe`.
- * `onProgress(message)` reports status for a UI to show.
+ * rooted at `/main.rs`) to a native Windows `.exe` for `triple` (one of
+ * `NATIVE_TARGETS`). `onProgress(message)` reports status for a UI to show.
  */
-export async function buildNativeApp(files, onProgress) {
-  onProgress?.("Downloading native toolchain...");
+export async function buildNativeApp(files, triple, onProgress) {
+  if (!NATIVE_TARGETS.includes(triple)) {
+    throw new Error(`unsupported native target ${triple} (expected one of ${NATIVE_TARGETS.join(", ")})`);
+  }
+  const TARGET_BASE = `${TOOLCHAIN_BASE}${triple}/`;
+  onProgress?.(`Downloading native toolchain (${triple})...`);
   const [rustcWasmBytes, mingwCrt2] = await Promise.all([
     cachedFetch(`${TOOLCHAIN_BASE}rustc_opt.wasm`, onProgress),
-    cachedFetch(`${TOOLCHAIN_BASE}mingw_crt2.o`, onProgress),
+    cachedFetch(`${TARGET_BASE}crt2.o`, onProgress),
   ]);
 
   // Each `.rlib` is only a metadata stub; current rustc needs its sibling
   // `.rmeta` next to it. A missing file fails the build loudly here, not as
   // an obscure rustc error later.
-  const stems = await fetchManifest("sysroot/index.json");
+  const stems = await fetchManifest(TARGET_BASE, "sysroot/index.json");
   const libDir = new Map();
   await Promise.all(
     stems.map(async (stem) => {
       const [rlib, rmeta] = await Promise.all([
-        cachedFetch(`${TOOLCHAIN_BASE}sysroot/${stem}.rlib`, onProgress),
-        cachedFetch(`${TOOLCHAIN_BASE}sysroot/${stem}.rmeta`, onProgress),
+        cachedFetch(`${TARGET_BASE}sysroot/${stem}.rlib`, onProgress),
+        cachedFetch(`${TARGET_BASE}sysroot/${stem}.rmeta`, onProgress),
       ]);
       libDir.set(`${stem}.rlib`, new File(rlib));
       libDir.set(`${stem}.rmeta`, new File(rmeta));
     }),
   );
   const [rsbegin, rsend] = await Promise.all([
-    cachedFetch(`${TOOLCHAIN_BASE}sysroot/rsbegin.o`, onProgress),
-    cachedFetch(`${TOOLCHAIN_BASE}sysroot/rsend.o`, onProgress),
+    cachedFetch(`${TARGET_BASE}sysroot/rsbegin.o`, onProgress),
+    cachedFetch(`${TARGET_BASE}sysroot/rsend.o`, onProgress),
   ]);
   libDir.set("rsbegin.o", new File(rsbegin));
   libDir.set("rsend.o", new File(rsend));
   libDir.set("self-contained", new Directory(new Map([["crt2.o", new File(mingwCrt2)]])));
 
-  const mingwStems = await fetchManifest("mingw-libs/index.json");
+  const mingwStems = await fetchManifest(TARGET_BASE, "mingw-libs/index.json");
   const mingwLibDir = new Map();
   await Promise.all(
     mingwStems.map(async (stem) => {
-      const bytes = await cachedFetch(`${TOOLCHAIN_BASE}mingw-libs/${stem}.a`, onProgress);
+      const bytes = await cachedFetch(`${TARGET_BASE}mingw-libs/${stem}.a`, onProgress);
       mingwLibDir.set(`${stem}.a`, new File(bytes));
     }),
   );
@@ -123,7 +132,7 @@ export async function buildNativeApp(files, onProgress) {
     new Map([
       ["lib", new Directory(new Map([
         ["rustlib", new Directory(new Map([
-          ["x86_64-pc-windows-gnu", new Directory(new Map([["lib", new Directory(libDir)]]))],
+          [triple, new Directory(new Map([["lib", new Directory(libDir)]]))],
         ]))],
       ]))],
     ]),
@@ -144,13 +153,13 @@ export async function buildNativeApp(files, onProgress) {
     allocator_size: 256 * 1024 * 1024,
   });
 
-  const SYSLIB = "/sysroot/lib/rustlib/x86_64-pc-windows-gnu/lib";
+  const SYSLIB = `/sysroot/lib/rustlib/${triple}/lib`;
   const result = await runWorker(farm.get_ref(), rustcWasmBytes, [
     "rustc", "/work/main.rs",
     "--crate-name", "app",
     "--crate-type", "bin",
     "--edition", "2021",
-    "--target", "x86_64-pc-windows-gnu",
+    "--target", triple,
     "--sysroot", "/sysroot",
     "-C", "linker-flavor=ld.lld",
     "-C", `link-arg=${SYSLIB}/self-contained/crt2.o`,

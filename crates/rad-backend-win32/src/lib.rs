@@ -192,7 +192,13 @@ mod ffi {
             cy: i32,
             flags: u32,
         ) -> i32;
+        // 64-bit user32 exports the *LongPtr* functions. 32-bit user32 does
+        // not: there `GetWindowLongPtrW` is only a header macro for
+        // `GetWindowLongW`, and `LONG` is pointer-sized, so binding the
+        // same Rust name to that export is exact.
+        #[cfg_attr(target_pointer_width = "32", link_name = "SetWindowLongW")]
         pub fn SetWindowLongPtrW(hwnd: HWND, index: i32, new_long: isize) -> isize;
+        #[cfg_attr(target_pointer_width = "32", link_name = "GetWindowLongW")]
         pub fn GetWindowLongPtrW(hwnd: HWND, index: i32) -> isize;
         pub fn GetClientRect(hwnd: HWND, rect: *mut Rect) -> i32;
         pub fn AdjustWindowRect(rect: *mut Rect, style: u32, menu: i32) -> i32;
