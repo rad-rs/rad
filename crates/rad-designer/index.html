@@ -125,21 +125,34 @@
   #tab-panels { grid-template-columns: 1fr; }
   .monaco-pane { width: 100%; height: 100%; }
 
+  /* One third of the window tall by default; the top edge is a drag handle
+     (see the script at the end of the body) and the height is clamped so
+     the console can never swallow the whole page. */
   #build-console {
-    display: none; flex: 0 0 180px; flex-direction: column;
-    background: #000; border-top: 2px solid #0f0;
+    display: none; flex: 0 0 33.333vh; min-height: 80px; max-height: 80vh;
+    flex-direction: column; background: #000; border-top: 2px solid #0f0;
+    position: relative;
   }
   #build-console.visible { display: flex; }
+  #build-console-resizer {
+    position: absolute; top: -6px; left: 0; right: 0; height: 10px;
+    cursor: ns-resize; touch-action: none; z-index: 5;
+  }
+  #build-console-resizer:hover, #build-console.resizing #build-console-resizer {
+    background: rgba(0, 255, 0, 0.35);
+  }
+  body.console-resizing { cursor: ns-resize; user-select: none; }
+  body.console-resizing #preview { pointer-events: none; }
   #build-console-header {
     display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto;
-    padding: 3px 10px; background: #0a0a0a; color: #0f0;
+    padding: 3px 6px 3px 10px; background: #0a0a0a; color: #0f0;
     font: 11px "Consolas", monospace; text-transform: uppercase; letter-spacing: 0.04em;
   }
   #build-console-close {
-    background: none; border: none; color: #0f0; font: 13px "Consolas", monospace;
-    cursor: pointer; padding: 0 4px;
+    background: none; border: 1px solid transparent; border-radius: 3px; color: #0f0;
+    font: 16px/1 "Consolas", monospace; cursor: pointer; width: 24px; height: 22px; padding: 0;
   }
-  #build-console-close:hover { color: #fff; }
+  #build-console-close:hover { color: #fff; border-color: #0f0; background: #131; }
   #build-console-log {
     flex: 1 1 auto; margin: 0; padding: 6px 10px; overflow-y: auto;
     color: #0f0; background: #000; font: 12px/1.4 "Consolas", monospace;
@@ -226,11 +239,56 @@
 </div>
 
 <div id="build-console">
+  <div id="build-console-resizer" title="Drag to resize"></div>
   <div id="build-console-header">
     <span>Build Console</span>
-    <button id="build-console-close" title="Hide">×</button>
+    <button id="build-console-close" title="Close" aria-label="Close build console">×</button>
   </div>
   <pre id="build-console-log"></pre>
 </div>
+<script>
+// Vertical resize for the build console: drag its top edge. The height is
+// remembered per browser (localStorage may be unavailable, so every access is
+// guarded) and clamped to the same bounds the CSS enforces.
+(function () {
+  var panel = document.getElementById("build-console");
+  var handle = document.getElementById("build-console-resizer");
+  var KEY = "rad-designer.console-height";
+  var MIN = 80;
+
+  function clamp(px) { return Math.max(MIN, Math.min(px, window.innerHeight * 0.8)); }
+  function apply(px) { panel.style.flexBasis = clamp(px) + "px"; }
+
+  try {
+    var saved = parseFloat(localStorage.getItem(KEY));
+    if (saved > 0) apply(saved);
+  } catch (e) { /* storage unavailable: keep the 1/3 default */ }
+
+  handle.addEventListener("pointerdown", function (e) {
+    handle.setPointerCapture(e.pointerId);
+    panel.classList.add("resizing");
+    document.body.classList.add("console-resizing");
+    e.preventDefault();
+  });
+  handle.addEventListener("pointermove", function (e) {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    apply(window.innerHeight - e.clientY);
+  });
+  function stop(e) {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    handle.releasePointerCapture(e.pointerId);
+    panel.classList.remove("resizing");
+    document.body.classList.remove("console-resizing");
+    try { localStorage.setItem(KEY, String(panel.getBoundingClientRect().height)); } catch (err) {}
+  }
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  // Double-click restores the one-third default.
+  handle.addEventListener("dblclick", function () {
+    panel.style.flexBasis = "";
+    try { localStorage.removeItem(KEY); } catch (err) {}
+  });
+})();
+</script>
 </body>
 </html>
