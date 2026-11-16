@@ -1,0 +1,12 @@
+[build]
+# frame.html is a plain copied file, not trunk-processed, so it imports
+# the wasm-bindgen glue by a fixed name rather than a content-hashed one.
+filehash = false
+
+[watch]
+# rad-designer depends on rad-core and rad-backend-web; without this trunk
+# only notices edits inside crates/rad-designer itself.
+watch = ["../rad-core", "../rad-backend-web"]
+
+[serve]
+open = false

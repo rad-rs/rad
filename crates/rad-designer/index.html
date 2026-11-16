@@ -4,78 +4,93 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>rad designer</title>
+<!-- The designer runs from the copy of the wasm that frame.html loads
+     inside the #preview iframe: wasm-bindgen's casts are `instanceof`
+     checks against the realm that loaded the module, and the form's
+     elements live in the iframe's realm. trunk still instantiates the
+     module here too; `start()` returns immediately when not in a frame. -->
 <link data-trunk rel="rust" />
+<link data-trunk rel="copy-file" href="frame.html" />
+<link data-trunk rel="copy-file" href="skins.css" />
+<link data-trunk rel="copy-file" href="monaco-bridge.js" />
+<!-- build-pipeline.js is NOT copy-file'd: wasm-bindgen's `module = "/build-pipeline.js"`
+     import snapshots it into its own snippets/<hash>/ directory instead,
+     which is what's actually served — see that file's imports, which
+     are root-absolute for exactly this reason. -->
+<link data-trunk rel="copy-file" href="build-worker.js" />
+<link data-trunk rel="copy-file" href="thread_spawn.js" />
+<link data-trunk rel="copy-dir" href="vendor" />
+<link data-trunk rel="copy-dir" href="native-toolchain" />
+<link data-trunk rel="copy-file" href="coi-serviceworker.js" />
+<!-- `SharedArrayBuffer` (needed by the in-browser compiler's threaded
+     WASI runtime) requires cross-origin isolation. `trunk serve` has no
+     way to set response headers, so this service worker re-serves every
+     response with COOP/COEP added instead — the standard workaround for
+     a static host with no header control. -->
+<script src="coi-serviceworker.js"></script>
+<!-- Monaco — the real VS Code editor component — loaded the classic way
+     (AMD loader + script tag) rather than bundled, since this page has
+     no bundler. `radMonacoReady` is what monaco-bridge.js (running in
+     the iframe's realm) awaits before touching `window.parent.monaco`. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.49.0/min/vs/loader.min.js"></script>
+<script>
+  require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.49.0/min/vs" } });
+  window.radMonacoReady = new Promise((resolve) => {
+    require(["vs/editor/editor.main"], () => resolve());
+  });
+</script>
 <style>
-  body { margin: 0; font-family: sans-serif; background: #f3f3f3; display: flex; height: 100vh; }
-  #bar { position: absolute; top: 0; left: 0; right: 0; padding: 8px 12px; background: #222; color: #fff; font: 13px sans-serif; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: sans-serif; background: #f3f3f3; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  #bar {
+    display: flex; align-items: center; gap: 16px; flex: 0 0 auto;
+    padding: 8px 12px; background: #222; color: #fff; font: 13px sans-serif;
+  }
+  #bar .spacer { flex: 1; }
+  #bar select { font: 12px "Segoe UI", sans-serif; }
 
-  #palette { width: 140px; margin: 44px 0 0 0; padding: 12px; background: #e8e8e8; border-right: 1px solid #ccc; }
-  #palette h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0 0 8px; }
+  #tab-bar { display: flex; flex: 0 0 auto; background: #ddd; border-bottom: 1px solid #bbb; }
+  .tab {
+    display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+    font: 12px "Segoe UI", sans-serif; color: #333; background: #ddd;
+    border-right: 1px solid #ccc; cursor: pointer; user-select: none;
+  }
+  .tab.active { background: #fff; font-weight: 600; }
+  .tab .tab-close { color: #888; font-size: 11px; }
+  .tab .tab-close:hover { color: #000; }
+
+  #main { position: relative; flex: 1 1 auto; min-height: 0; }
+  #designer-view, #tab-panels {
+    position: absolute; inset: 0; display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  #tab-panels { display: none; grid-template-columns: none; }
+
+  #palette { grid-column: 1; padding: 10px 8px; background: #f3f3f3; border-right: 1px solid #ccc; overflow: auto; width: 168px; }
+  #palette h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0 0 8px; padding: 0 4px; }
+  .palette-group-header {
+    font: 600 11px "Segoe UI", sans-serif; color: #444; text-transform: uppercase;
+    letter-spacing: 0.03em; padding: 6px 4px 4px; margin-top: 4px;
+  }
   .palette-item {
-    display: block; padding: 4px 14px; margin-bottom: 6px; background: #e1e1e1;
-    border: 1px solid #adadad; border-radius: 2px; cursor: grab;
-    font: 13px "Segoe UI", sans-serif;
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px;
+    cursor: grab; font: 12px "Segoe UI", sans-serif; color: #1b1b1b;
+    border: 1px solid transparent;
+  }
+  .palette-item:hover { background: #e5f1fb; border-color: #c7e0f4; }
+  .palette-item:active { cursor: grabbing; background: #cce4f7; }
+  .palette-icon {
+    flex: 0 0 auto; width: 20px; height: 20px; display: flex; align-items: center;
+    justify-content: center; border-radius: 3px; background: #0078d4; color: #fff;
+    font: 11px "Segoe UI", sans-serif; font-weight: 600;
   }
 
-  #rad-stage { flex: 1; position: relative; margin: 44px 16px 0; }
+  #preview { grid-column: 2; display: block; width: 100%; height: 100%; border: 0; box-sizing: border-box; }
 
-  .rad-window {
-    border: 1px solid #555;
-    background: #fff;
-    min-width: 160px;
-    min-height: 120px;
-    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
-  }
-  .rad-window-titlebar {
-    background: #2b579a; color: #fff; font: 13px "Segoe UI", sans-serif;
-    padding: 4px 8px; user-select: none;
-  }
-  .rad-window-body { position: relative; }
-  .rad-window-body button {
-    position: absolute; font-family: "Segoe UI", sans-serif;
-    border: 1px solid #adadad; background: #e1e1e1; border-radius: 2px;
-    cursor: move; user-select: none; touch-action: none;
-  }
-  .rad-window-body > span {
-    position: absolute; font-family: "Segoe UI", sans-serif; font-size: 13px;
-    cursor: move; user-select: none; touch-action: none;
-  }
-  .rad-window-body .rad-checkbox {
-    position: absolute; display: inline-flex; align-items: center; gap: 4px;
-    font-family: "Segoe UI", sans-serif; font-size: 13px;
-    cursor: move; user-select: none; touch-action: none;
-  }
-
-  /* Design-time selection: dashed box + 8 handles, VS-style. Purely
-     visual for now — pointer-events:none so it never blocks clicks or
-     the drag-to-reposition behavior on whatever it's drawn over. */
-  .rad-selection {
-    position: absolute;
-    display: none;
-    border: 1px dashed #0078d7;
-    pointer-events: none;
-  }
-  .rad-selection.visible { display: block; }
-  .rad-handle {
-    position: absolute;
-    width: 6px; height: 6px;
-    background: #fff;
-    border: 1px solid #0078d7;
-    /* Re-enable events: the overlay itself is pointer-events:none so it
-       doesn't block clicks on what's selected, but the handles need to
-       receive pointerdown/move/up to drive resizing. */
-    pointer-events: auto;
-  }
-  .rad-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
-  .rad-handle.n  { left: 50%; top: -4px; margin-left: -3px; cursor: ns-resize; }
-  .rad-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
-  .rad-handle.e  { right: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
-  .rad-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
-  .rad-handle.s  { left: 50%; bottom: -4px; margin-left: -3px; cursor: ns-resize; }
-  .rad-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
-  .rad-handle.w  { left: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
-
-  #properties { width: 180px; margin: 44px 0 0 0; padding: 12px; background: #e8e8e8; border-left: 1px solid #ccc; }
+  #properties { grid-column: 3; padding: 12px; background: #e8e8e8; border-left: 1px solid #ccc; overflow: auto; width: 180px; }
   #properties h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0 0 8px; }
   .prop-row { margin-bottom: 8px; }
   .prop-row label { display: block; font: 11px "Segoe UI", sans-serif; color: #555; margin-bottom: 2px; }
@@ -86,39 +101,132 @@
   .prop-row input:disabled { background: #ddd; color: #888; }
   .prop-row.hidden { display: none; }
 
-  #output-panel { width: 420px; margin: 44px 16px 0 0; display: flex; flex-direction: column; }
-  #output-panel button { margin-bottom: 8px; padding: 6px 12px; align-self: flex-start; }
-  #generated-code { flex: 1; font: 12px "Consolas", monospace; padding: 8px; }
+  #files { grid-column: 4; padding: 12px; background: #e8e8e8; overflow: auto; width: 170px; }
+  .files-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .files-header h3 { font-size: 12px; text-transform: uppercase; color: #666; margin: 0; }
+  #new-file-button {
+    width: 20px; height: 20px; line-height: 1; border: 1px solid #adadad; border-radius: 3px;
+    background: #fff; color: #333; font: 14px sans-serif; cursor: pointer; padding: 0;
+  }
+  #new-file-button:hover { background: #f0f0f0; }
+  .file-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 4px;
+    padding: 4px 6px; margin-bottom: 2px; border-radius: 2px;
+    font: 12px "Consolas", monospace; color: #333; cursor: pointer;
+  }
+  .file-item:hover { background: #d8d8d8; }
+  .file-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-item .file-delete {
+    flex: none; color: #888; font: 12px sans-serif; visibility: hidden; padding: 0 2px;
+  }
+  .file-item:hover .file-delete { visibility: visible; }
+  .file-item .file-delete:hover { color: #c00; }
+
+  #tab-panels { grid-template-columns: 1fr; }
+  .monaco-pane { width: 100%; height: 100%; }
+
+  #build-console {
+    display: none; flex: 0 0 180px; flex-direction: column;
+    background: #000; border-top: 2px solid #0f0;
+  }
+  #build-console.visible { display: flex; }
+  #build-console-header {
+    display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto;
+    padding: 3px 10px; background: #0a0a0a; color: #0f0;
+    font: 11px "Consolas", monospace; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #build-console-close {
+    background: none; border: none; color: #0f0; font: 13px "Consolas", monospace;
+    cursor: pointer; padding: 0 4px;
+  }
+  #build-console-close:hover { color: #fff; }
+  #build-console-log {
+    flex: 1 1 auto; margin: 0; padding: 6px 10px; overflow-y: auto;
+    color: #0f0; background: #000; font: 12px/1.4 "Consolas", monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 </head>
 <body>
-<div id="bar">rad-designer — drag a control onto the form, then Save to generate form1.designer.rs</div>
-
-<div id="palette">
-  <h3>Toolbox</h3>
-  <div class="palette-item" data-kind="Button" draggable="true">Button</div>
-  <div class="palette-item" data-kind="Label" draggable="true">Label</div>
-  <div class="palette-item" data-kind="CheckBox" draggable="true">CheckBox</div>
+<div id="bar">
+  <span>rad-designer — drag a control onto the form, double-click it for its handler</span>
+  <span class="spacer"></span>
+  <span id="build-status"></span>
+  <button id="build-button">Build &amp; download</button>
+  <button id="native-build-button" title="Compile to a real, standalone Windows .exe">Build native .exe</button>
+  <button id="reset-button" title="Clear all project files and reload">Reset project</button>
+  <label>Look &amp; feel
+    <select id="skin-select">
+      <option value="windows" selected>Windows</option>
+      <option value="macos">macOS</option>
+      <option value="linux">Linux</option>
+      <option value="web">Web (browser default)</option>
+    </select>
+  </label>
 </div>
 
-<div id="rad-stage"></div>
+<div id="tab-bar">
+  <div class="tab active" id="tab-designer" data-tab="designer">Designer</div>
+</div>
 
-<div id="properties">
-  <h3>Properties</h3>
-  <div class="prop-row" id="row-name"><label>Name</label><input id="prop-name" readonly /></div>
-  <div class="prop-row" id="row-text"><label>Text</label><input id="prop-text" /></div>
-  <div class="prop-row" id="row-x"><label>X</label><input id="prop-x" type="number" /></div>
-  <div class="prop-row" id="row-y"><label>Y</label><input id="prop-y" type="number" /></div>
-  <div class="prop-row" id="row-width"><label>Width</label><input id="prop-width" type="number" /></div>
-  <div class="prop-row" id="row-height"><label>Height</label><input id="prop-height" type="number" /></div>
-  <div class="prop-row" id="row-checked">
-    <label><input id="prop-checked" type="checkbox" style="width:auto;" /> Checked</label>
+<div id="main">
+  <div id="designer-view">
+    <div id="palette">
+      <h3>Toolbox</h3>
+      <div class="palette-group-header">Common Controls</div>
+      <div class="palette-item" data-kind="Button" draggable="true"><span class="palette-icon">B</span>Button</div>
+      <div class="palette-item" data-kind="Label" draggable="true"><span class="palette-icon">A</span>Label</div>
+      <div class="palette-item" data-kind="CheckBox" draggable="true"><span class="palette-icon">&#10003;</span>CheckBox</div>
+      <div class="palette-item" data-kind="TextBox" draggable="true"><span class="palette-icon">ab</span>TextBox</div>
+      <div class="palette-item" data-kind="RadioButton" draggable="true"><span class="palette-icon">&#9679;</span>RadioButton</div>
+      <div class="palette-group-header">Display</div>
+      <div class="palette-item" data-kind="ProgressBar" draggable="true"><span class="palette-icon">&#9646;</span>ProgressBar</div>
+      <div class="palette-item" data-kind="PictureBox" draggable="true"><span class="palette-icon">&#9634;</span>PictureBox</div>
+      <div class="palette-item" data-kind="TreeView" draggable="true"><span class="palette-icon">&#8862;</span>TreeView</div>
+    </div>
+
+    <!-- Last in source order within this grid on purpose: everything the
+         iframe's wasm reaches out for via window.parent already exists by
+         the time it's parsed. -->
+    <iframe id="preview" src="frame.html" title="Form preview"></iframe>
+
+    <div id="properties">
+      <h3>Properties</h3>
+      <div class="prop-row" id="row-name"><label>Name</label><input id="prop-name" readonly /></div>
+      <div class="prop-row" id="row-text"><label>Text</label><input id="prop-text" /></div>
+      <div class="prop-row" id="row-x"><label>X</label><input id="prop-x" type="number" /></div>
+      <div class="prop-row" id="row-y"><label>Y</label><input id="prop-y" type="number" /></div>
+      <div class="prop-row" id="row-width"><label>Width</label><input id="prop-width" type="number" /></div>
+      <div class="prop-row" id="row-height"><label>Height</label><input id="prop-height" type="number" /></div>
+      <div class="prop-row" id="row-checked">
+        <label><input id="prop-checked" type="checkbox" style="width:auto;" /> Checked</label>
+      </div>
+      <div class="prop-row" id="row-value"><label>Value</label><input id="prop-value" type="number" min="0" max="100" /></div>
+      <div class="prop-row" id="row-image-path"><label>Image path</label><input id="prop-image-path" placeholder="C:\path\to\image.bmp" /></div>
+      <div class="prop-row" id="row-items">
+        <label>Items (indent with spaces to nest)</label>
+        <textarea id="prop-items" rows="5" style="width:100%; box-sizing:border-box; font:12px 'Segoe UI', sans-serif; border:1px solid #adadad; resize:vertical;"></textarea>
+      </div>
+    </div>
+
+    <div id="files">
+      <div class="files-header">
+        <h3>Files</h3>
+        <button id="new-file-button" title="New file">+</button>
+      </div>
+      <div id="file-list"><!-- populated from the designer's file store --></div>
+    </div>
   </div>
+
+  <div id="tab-panels"></div>
 </div>
 
-<div id="output-panel">
-  <button id="save-button">Save (generate form1.designer.rs)</button>
-  <textarea id="generated-code" readonly placeholder="Generated Rust appears here after Save."></textarea>
+<div id="build-console">
+  <div id="build-console-header">
+    <span>Build Console</span>
+    <button id="build-console-close" title="Hide">×</button>
+  </div>
+  <pre id="build-console-log"></pre>
 </div>
 </body>
 </html>

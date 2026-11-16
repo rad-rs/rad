@@ -3,8 +3,10 @@ resolver = "2"
 members = [
     "crates/rad-core",
     "crates/rad-backend-web",
+    "crates/rad-backend-web-min",
     "crates/rad-backend-win32",
     "crates/rad-demo",
+    "crates/rad-demo-native",
     "crates/rad-designer",
 ]
 

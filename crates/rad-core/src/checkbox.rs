@@ -2,10 +2,10 @@ use crate::widget::impl_widget_common;
 use crate::{Host, WidgetHandle};
 
 pub trait CheckBoxHandle: WidgetHandle {
-    fn set_text(&mut self, text: &str);
+    fn set_text(&self, text: &str);
     fn text(&self) -> String;
 
-    fn set_checked(&mut self, checked: bool);
+    fn set_checked(&self, checked: bool);
     fn checked(&self) -> bool;
 }
 
@@ -21,7 +21,7 @@ impl CheckBox {
         }
     }
 
-    pub fn set_text(&mut self, text: &str) {
+    pub fn set_text(&self, text: &str) {
         self.handle.set_text(text);
     }
 
@@ -29,7 +29,7 @@ impl CheckBox {
         self.handle.text()
     }
 
-    pub fn set_checked(&mut self, checked: bool) {
+    pub fn set_checked(&self, checked: bool) {
         self.handle.set_checked(checked);
     }
 

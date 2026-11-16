@@ -20,6 +20,10 @@ pub trait WindowHandle: Host {
     /// whenever the user (or code) resizes the window.
     fn set_on_resize(&self, callback: Box<dyn FnMut(u32, u32)>);
 
+    /// Wires the form's default event — a click anywhere on it that
+    /// didn't land on one of its controls.
+    fn set_on_click(&self, callback: Box<dyn FnMut()>);
+
     /// Applies a generic default icon, the way every new WinForms form
     /// gets one even before you set a custom one. No-op for a backend
     /// that has nothing sensible to show (default here, not `unimplemented!`,
@@ -68,6 +72,10 @@ impl Window {
     pub fn on_resize(&self, callback: impl FnMut(u32, u32) + 'static) {
         self.handle.set_on_resize(Box::new(callback));
     }
+
+    pub fn on_click(&self, callback: impl FnMut() + 'static) {
+        self.handle.set_on_click(Box::new(callback));
+    }
 }
 
 impl Host for Window {
@@ -81,5 +89,25 @@ impl Host for Window {
 
     fn create_checkbox(&self, text: &str) -> Box<dyn crate::CheckBoxHandle> {
         self.handle.create_checkbox(text)
+    }
+
+    fn create_textbox(&self, text: &str) -> Box<dyn crate::TextBoxHandle> {
+        self.handle.create_textbox(text)
+    }
+
+    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn crate::RadioButtonHandle> {
+        self.handle.create_radio_button(group, text)
+    }
+
+    fn create_progress_bar(&self) -> Box<dyn crate::ProgressBarHandle> {
+        self.handle.create_progress_bar()
+    }
+
+    fn create_picture_box(&self) -> Box<dyn crate::PictureBoxHandle> {
+        self.handle.create_picture_box()
+    }
+
+    fn create_tree_view(&self) -> Box<dyn crate::TreeViewHandle> {
+        self.handle.create_tree_view()
     }
 }

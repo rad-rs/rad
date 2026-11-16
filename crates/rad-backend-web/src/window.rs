@@ -1,5 +1,11 @@
-use crate::{WebButtonHandle, WebCheckBoxHandle, WebLabelHandle};
-use rad_core::{Backend, ButtonHandle, CheckBoxHandle, Host, LabelHandle, WindowHandle};
+use crate::{
+    WebButtonHandle, WebCheckBoxHandle, WebLabelHandle, WebPictureBoxHandle,
+    WebProgressBarHandle, WebRadioButtonHandle, WebTextBoxHandle, WebTreeViewHandle,
+};
+use rad_core::{
+    Backend, ButtonHandle, CheckBoxHandle, Host, LabelHandle, PictureBoxHandle, ProgressBarHandle,
+    RadioButtonHandle, TextBoxHandle, TreeViewHandle, WindowHandle,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -117,6 +123,18 @@ impl WebWindow {
         &self.body
     }
 
+    /// The content area's own size — excludes the (hand-drawn) title
+    /// bar that `size()`/`WindowHandle::size` includes, unlike a real
+    /// OS window's `ClientSize` vs `Size`. The native-exe build pipeline
+    /// needs this one: a real Win32 title bar is a different height
+    /// than this preview's simulated one, so matching *this* size
+    /// (rather than the outer chrome total) is what keeps every
+    /// control's position lined up between preview and native output.
+    pub fn body_size(&self) -> (u32, u32) {
+        let body: &HtmlElement = self.body.dyn_ref().unwrap();
+        (body.offset_width().max(0) as u32, body.offset_height().max(0) as u32)
+    }
+
     /// The window's whole outer element (title bar + body), e.g. for
     /// drawing a design-time selection box around the form itself.
     pub fn element(&self) -> &HtmlElement {
@@ -157,6 +175,14 @@ impl WindowHandle for WebWindow {
 
     fn set_on_resize(&self, callback: Box<dyn FnMut(u32, u32)>) {
         *self.on_resize.borrow_mut() = Some(callback);
+    }
+
+    fn set_on_click(&self, mut callback: Box<dyn FnMut()>) {
+        let closure = Closure::wrap(Box::new(move || callback()) as Box<dyn FnMut()>);
+        self.chrome
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .ok();
+        closure.forget();
     }
 
     fn set_default_icon(&self) {
@@ -205,5 +231,41 @@ impl Host for WebWindow {
     fn create_checkbox(&self, text: &str) -> Box<dyn CheckBoxHandle> {
         let document = self.body.owner_document().expect("body has a document");
         Box::new(WebCheckBoxHandle::new_draggable(&document, &self.body, text, false))
+    }
+
+    fn create_textbox(&self, text: &str) -> Box<dyn TextBoxHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        Box::new(WebTextBoxHandle::new_draggable(&document, &self.body, text))
+    }
+
+    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn RadioButtonHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        Box::new(WebRadioButtonHandle::new_draggable(
+            &document, &self.body, group, text, false,
+        ))
+    }
+
+    fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::create_element(&document, &self.body, "progress");
+        el.set_attribute("max", "100").ok();
+        el.set_attribute("value", "0").ok();
+        Box::new(WebProgressBarHandle::new_draggable(el))
+    }
+
+    fn create_picture_box(&self) -> Box<dyn PictureBoxHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::create_element(&document, &self.body, "img");
+        el.style().set_property("object-fit", "contain").ok();
+        Box::new(WebPictureBoxHandle::new_draggable(el))
+    }
+
+    fn create_tree_view(&self) -> Box<dyn TreeViewHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::create_element(&document, &self.body, "div");
+        el.style().set_property("overflow", "auto").ok();
+        el.style().set_property("border", "1px solid #adadad").ok();
+        el.style().set_property("background", "#fff").ok();
+        Box::new(WebTreeViewHandle::new_draggable(el))
     }
 }

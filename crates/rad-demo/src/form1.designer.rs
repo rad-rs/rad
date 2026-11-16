@@ -8,7 +8,7 @@ pub struct Form1Controls {
 }
 
 pub fn build(window: &Window) -> Form1Controls {
-    let mut button1 = Button::new(window, "Click me");
+    let button1 = Button::new(window, "Click me");
     button1.set_pos(20, 20);
     button1.set_width(100);
     button1.set_height(32);

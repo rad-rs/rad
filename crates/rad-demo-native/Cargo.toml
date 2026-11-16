@@ -1,0 +1,12 @@
+[package]
+name = "rad-demo-native"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rad-demo-native"
+path = "src/main.rs"
+
+[dependencies]
+rad-core = { path = "../rad-core" }
+rad-backend-win32 = { path = "../rad-backend-win32" }

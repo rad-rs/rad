@@ -2,7 +2,7 @@ use crate::widget::impl_widget_common;
 use crate::{Host, WidgetHandle};
 
 pub trait ButtonHandle: WidgetHandle {
-    fn set_text(&mut self, text: &str);
+    fn set_text(&self, text: &str);
     fn text(&self) -> String;
 }
 
@@ -19,7 +19,7 @@ impl Button {
         }
     }
 
-    pub fn set_text(&mut self, text: &str) {
+    pub fn set_text(&self, text: &str) {
         self.handle.set_text(text);
     }
 

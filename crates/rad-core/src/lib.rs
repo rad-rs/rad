@@ -5,13 +5,23 @@
 mod button;
 mod checkbox;
 mod label;
+mod picture_box;
+mod progress_bar;
+mod radio_button;
+mod textbox;
+mod tree_view;
 mod widget;
 mod window;
 
 pub use button::{Button, ButtonHandle};
 pub use checkbox::{CheckBox, CheckBoxHandle};
 pub use label::{Label, LabelHandle};
-pub use widget::WidgetHandle;
+pub use picture_box::{PictureBox, PictureBoxHandle};
+pub use progress_bar::{ProgressBar, ProgressBarHandle};
+pub use radio_button::{RadioButton, RadioButtonHandle};
+pub use textbox::{TextBox, TextBoxHandle};
+pub use tree_view::{TreeItem, TreeView, TreeViewHandle};
+pub use widget::{Color, WidgetHandle};
 pub use window::{Backend, Window, WindowHandle};
 
 /// A platform family a backend renders for, or that a preview can emulate.
@@ -31,4 +41,9 @@ pub trait Host {
     fn create_button(&self, text: &str) -> Box<dyn ButtonHandle>;
     fn create_label(&self, text: &str) -> Box<dyn LabelHandle>;
     fn create_checkbox(&self, text: &str) -> Box<dyn CheckBoxHandle>;
+    fn create_textbox(&self, text: &str) -> Box<dyn TextBoxHandle>;
+    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn RadioButtonHandle>;
+    fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle>;
+    fn create_picture_box(&self) -> Box<dyn PictureBoxHandle>;
+    fn create_tree_view(&self) -> Box<dyn TreeViewHandle>;
 }

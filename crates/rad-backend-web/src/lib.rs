@@ -7,12 +7,15 @@ mod window;
 
 pub use window::{WebBackend, WebWindow};
 
-use rad_core::{ButtonHandle, CheckBoxHandle, Host, LabelHandle, OsSkin, WidgetHandle};
+use rad_core::{
+    ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, OsSkin, PictureBoxHandle,
+    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TreeViewHandle, WidgetHandle,
+};
 use std::cell::Cell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, Element, HtmlElement, HtmlInputElement, PointerEvent};
+use web_sys::{Document, Element, HtmlElement, HtmlInputElement, MouseEvent, PointerEvent};
 
 fn skin_class(skin: OsSkin) -> &'static str {
     match skin {
@@ -65,6 +68,41 @@ impl Host for WebHost {
     fn create_checkbox(&self, text: &str) -> Box<dyn CheckBoxHandle> {
         Box::new(WebCheckBoxHandle::new(&self.document, &self.container, text, false))
     }
+
+    fn create_textbox(&self, text: &str) -> Box<dyn TextBoxHandle> {
+        Box::new(WebTextBoxHandle::new(&self.document, &self.container, text))
+    }
+
+    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn RadioButtonHandle> {
+        Box::new(WebRadioButtonHandle::new(
+            &self.document,
+            &self.container,
+            group,
+            text,
+            false,
+        ))
+    }
+
+    fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle> {
+        let el = create_element(&self.document, &self.container, "progress");
+        el.set_attribute("max", "100").ok();
+        el.set_attribute("value", "0").ok();
+        Box::new(WebProgressBarHandle::new(el))
+    }
+
+    fn create_picture_box(&self) -> Box<dyn PictureBoxHandle> {
+        let el = create_element(&self.document, &self.container, "img");
+        el.style().set_property("object-fit", "contain").ok();
+        Box::new(WebPictureBoxHandle::new(el))
+    }
+
+    fn create_tree_view(&self) -> Box<dyn TreeViewHandle> {
+        let el = create_element(&self.document, &self.container, "div");
+        el.style().set_property("overflow", "auto").ok();
+        el.style().set_property("border", "1px solid #adadad").ok();
+        el.style().set_property("background", "#fff").ok();
+        Box::new(WebTreeViewHandle::new(el))
+    }
 }
 
 /// Creates a bare `<tag>` and appends it to `parent`. Every control is
@@ -110,29 +148,102 @@ pub(crate) fn el_height(el: &HtmlElement) -> u32 {
     el.offset_height().max(0) as u32
 }
 
+/// `None` reads back correctly for the same reason `el_set_back_color`'s
+/// does: clearing the property (not setting `"inherit"`) is what makes
+/// an unset color read back as `None` rather than a parsed color.
+pub(crate) fn el_set_fore_color(el: &HtmlElement, color: Option<Color>) {
+    match color {
+        Some(c) => {
+            el.style().set_property("color", &format!("rgb({},{},{})", c.r, c.g, c.b)).ok();
+        }
+        None => {
+            el.style().remove_property("color").ok();
+        }
+    };
+}
+
+pub(crate) fn el_fore_color(el: &HtmlElement) -> Option<Color> {
+    parse_rgb(&el.style().get_property_value("color").unwrap_or_default())
+}
+
+/// `None` reads back correctly with no extra state to track: an
+/// `HtmlElement` with no inline `background-color` already renders
+/// transparent, which is exactly what `None` means here, and clearing
+/// the property (rather than setting it to `"transparent"`) is what
+/// makes a later read see "unset" again instead of a color.
+pub(crate) fn el_set_back_color(el: &HtmlElement, color: Option<Color>) {
+    match color {
+        Some(c) => {
+            el.style().set_property("background-color", &format!("rgb({},{},{})", c.r, c.g, c.b)).ok();
+        }
+        None => {
+            el.style().remove_property("background-color").ok();
+        }
+    }
+}
+
+pub(crate) fn el_back_color(el: &HtmlElement) -> Option<Color> {
+    parse_rgb(&el.style().get_property_value("background-color").unwrap_or_default())
+}
+
+fn parse_rgb(s: &str) -> Option<Color> {
+    let inner = s.strip_prefix("rgb(")?.strip_suffix(')')?;
+    let mut parts = inner.split(',');
+    let r: u8 = parts.next()?.trim().parse().ok()?;
+    let g: u8 = parts.next()?.trim().parse().ok()?;
+    let b: u8 = parts.next()?.trim().parse().ok()?;
+    Some(Color::rgb(r, g, b))
+}
+
+/// Wires `el`'s click — the default event every control type exposes.
+/// `callback` only needs to run, never be cancelled or re-read, so it's
+/// simplest to just leak the listener for the page's lifetime, same as
+/// every other one-shot closure in this crate.
+pub(crate) fn el_set_on_click(el: &HtmlElement, mut callback: Box<dyn FnMut()>) {
+    let closure = Closure::wrap(Box::new(move || callback()) as Box<dyn FnMut()>);
+    el.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .ok();
+    closure.forget();
+}
+
 /// Generates a `WidgetHandle` impl for `$ty` from a `$field: HtmlElement`
 /// (or anything that derefs to one), using the shared `el_*` functions
 /// above. Every control handle in this crate needs this same impl.
 macro_rules! impl_widget_handle {
     ($ty:ty, $field:ident) => {
         impl WidgetHandle for $ty {
-            fn set_pos(&mut self, x: i32, y: i32) {
+            fn set_pos(&self, x: i32, y: i32) {
                 el_set_pos(&self.$field, x, y);
             }
             fn pos(&self) -> (i32, i32) {
                 el_pos(&self.$field)
             }
-            fn set_width(&mut self, width: u32) {
+            fn set_width(&self, width: u32) {
                 el_set_width(&self.$field, width);
             }
             fn width(&self) -> u32 {
                 el_width(&self.$field)
             }
-            fn set_height(&mut self, height: u32) {
+            fn set_height(&self, height: u32) {
                 el_set_height(&self.$field, height);
             }
             fn height(&self) -> u32 {
                 el_height(&self.$field)
+            }
+            fn set_on_click(&self, callback: Box<dyn FnMut()>) {
+                el_set_on_click(&self.$field, callback);
+            }
+            fn set_fore_color(&self, color: Option<Color>) {
+                el_set_fore_color(&self.$field, color);
+            }
+            fn fore_color(&self) -> Option<Color> {
+                el_fore_color(&self.$field)
+            }
+            fn set_back_color(&self, color: Option<Color>) {
+                el_set_back_color(&self.$field, color);
+            }
+            fn back_color(&self) -> Option<Color> {
+                el_back_color(&self.$field)
             }
         }
     };
@@ -203,6 +314,21 @@ pub(crate) fn attach_drag(el: &HtmlElement) -> [Closure<dyn FnMut(PointerEvent)>
     [on_down, on_move, on_up]
 }
 
+/// Stops a checkbox/radio `<input>` from actually toggling on click —
+/// used only for the design-time (draggable) instances the designer
+/// places, where a click should select the control, not flip its state.
+/// `preventDefault` on the click still lets it bubble, so the designer's
+/// own click-to-select delegation (listening higher up the DOM) still runs.
+fn suppress_native_toggle(input: &HtmlInputElement) -> Closure<dyn FnMut(MouseEvent)> {
+    let closure = Closure::wrap(Box::new(|e: MouseEvent| {
+        e.prevent_default();
+    }) as Box<dyn FnMut(MouseEvent)>);
+    input
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .ok();
+    closure
+}
+
 // --- Button ---
 
 pub(crate) struct WebButtonHandle {
@@ -225,7 +351,7 @@ impl WebButtonHandle {
 impl_widget_handle!(WebButtonHandle, el);
 
 impl ButtonHandle for WebButtonHandle {
-    fn set_text(&mut self, text: &str) {
+    fn set_text(&self, text: &str) {
         self.el.set_text_content(Some(text));
     }
 
@@ -255,12 +381,125 @@ impl WebLabelHandle {
 impl_widget_handle!(WebLabelHandle, el);
 
 impl LabelHandle for WebLabelHandle {
-    fn set_text(&mut self, text: &str) {
+    fn set_text(&self, text: &str) {
         self.el.set_text_content(Some(text));
     }
 
     fn text(&self) -> String {
         self.el.text_content().unwrap_or_default()
+    }
+}
+
+// --- ProgressBar ---
+
+pub(crate) struct WebProgressBarHandle {
+    el: HtmlElement,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebProgressBarHandle {
+    pub(crate) fn new(el: HtmlElement) -> Self {
+        Self { el, _drag: None }
+    }
+
+    pub(crate) fn new_draggable(el: HtmlElement) -> Self {
+        let drag = attach_drag(&el);
+        Self { el, _drag: Some(drag) }
+    }
+}
+
+impl_widget_handle!(WebProgressBarHandle, el);
+
+impl ProgressBarHandle for WebProgressBarHandle {
+    fn set_value(&self, value: u32) {
+        self.el.set_attribute("value", &value.min(100).to_string()).ok();
+    }
+
+    fn value(&self) -> u32 {
+        self.el
+            .get_attribute("value")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+}
+
+// --- PictureBox ---
+
+pub(crate) struct WebPictureBoxHandle {
+    el: HtmlElement,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebPictureBoxHandle {
+    pub(crate) fn new(el: HtmlElement) -> Self {
+        Self { el, _drag: None }
+    }
+
+    pub(crate) fn new_draggable(el: HtmlElement) -> Self {
+        let drag = attach_drag(&el);
+        Self { el, _drag: Some(drag) }
+    }
+}
+
+impl_widget_handle!(WebPictureBoxHandle, el);
+
+impl PictureBoxHandle for WebPictureBoxHandle {
+    fn set_image_path(&self, path: &str) {
+        self.el.set_attribute("src", path).ok();
+    }
+
+    fn image_path(&self) -> String {
+        self.el.get_attribute("src").unwrap_or_default()
+    }
+}
+
+// --- TreeView ---
+
+/// `items` is kept alongside the DOM rather than read back from it —
+/// rebuilding a nested `<ul>` on every `set_items` is simpler than
+/// parsing one back into `(depth, text)` pairs.
+pub(crate) struct WebTreeViewHandle {
+    el: HtmlElement,
+    items: std::cell::RefCell<Vec<rad_core::TreeItem>>,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebTreeViewHandle {
+    pub(crate) fn new(el: HtmlElement) -> Self {
+        Self { el, items: std::cell::RefCell::new(Vec::new()), _drag: None }
+    }
+
+    pub(crate) fn new_draggable(el: HtmlElement) -> Self {
+        let drag = attach_drag(&el);
+        Self { el, items: std::cell::RefCell::new(Vec::new()), _drag: Some(drag) }
+    }
+
+    fn render(&self) {
+        let document = self.el.owner_document().expect("el has a document");
+        self.el.set_text_content(None);
+        // One flat list, indenting each row by its depth rather than
+        // building real nested `<ul>`s — simplest way to render a
+        // depth-only hierarchy without tracking which rows are each
+        // other's ancestors.
+        for (depth, text) in self.items.borrow().iter() {
+            let row = create_element(&document, &self.el.clone().unchecked_into(), "div");
+            row.set_text_content(Some(text));
+            row.style().set_property("padding-left", &format!("{}px", depth * 16)).ok();
+            row.style().set_property("white-space", "nowrap").ok();
+        }
+    }
+}
+
+impl_widget_handle!(WebTreeViewHandle, el);
+
+impl TreeViewHandle for WebTreeViewHandle {
+    fn set_items(&self, items: &[rad_core::TreeItem]) {
+        *self.items.borrow_mut() = items.to_vec();
+        self.render();
+    }
+
+    fn items(&self) -> Vec<rad_core::TreeItem> {
+        self.items.borrow().clone()
     }
 }
 
@@ -274,6 +513,7 @@ pub(crate) struct WebCheckBoxHandle {
     input: HtmlInputElement,
     text_el: HtmlElement,
     _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+    _suppress_toggle: Option<Closure<dyn FnMut(MouseEvent)>>,
 }
 
 impl WebCheckBoxHandle {
@@ -295,7 +535,8 @@ impl WebCheckBoxHandle {
         let text_el: HtmlElement = text_el_raw.dyn_into().expect("<span> is an HtmlElement");
 
         let drag = draggable.then(|| attach_drag(&wrapper));
-        Self { wrapper, input, text_el, _drag: drag }
+        let suppress_toggle = draggable.then(|| suppress_native_toggle(&input));
+        Self { wrapper, input, text_el, _drag: drag, _suppress_toggle: suppress_toggle }
     }
 
     pub(crate) fn new(document: &Document, parent: &Element, text: &str, checked: bool) -> Self {
@@ -310,7 +551,7 @@ impl WebCheckBoxHandle {
 impl_widget_handle!(WebCheckBoxHandle, wrapper);
 
 impl CheckBoxHandle for WebCheckBoxHandle {
-    fn set_text(&mut self, text: &str) {
+    fn set_text(&self, text: &str) {
         self.text_el.set_text_content(Some(text));
     }
 
@@ -318,7 +559,162 @@ impl CheckBoxHandle for WebCheckBoxHandle {
         self.text_el.text_content().unwrap_or_default()
     }
 
-    fn set_checked(&mut self, checked: bool) {
+    fn set_checked(&self, checked: bool) {
+        self.input.set_checked(checked);
+    }
+
+    fn checked(&self) -> bool {
+        self.input.checked()
+    }
+}
+
+// --- TextBox ---
+
+pub(crate) struct WebTextBoxHandle {
+    input: HtmlInputElement,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebTextBoxHandle {
+    fn build(document: &Document, parent: &Element, text: &str, draggable: bool) -> Self {
+        let el = document.create_element("input").expect("create_element(\"input\")");
+        parent.append_child(&el).expect("appending to a live container should not fail");
+        let input: HtmlInputElement = el.dyn_into().expect("<input> is an HtmlInputElement");
+        input.set_type("text");
+        input.set_value(text);
+
+        let as_html: &HtmlElement = input.as_ref();
+        let drag = draggable.then(|| attach_drag(as_html));
+        Self { input, _drag: drag }
+    }
+
+    pub(crate) fn new(document: &Document, parent: &Element, text: &str) -> Self {
+        Self::build(document, parent, text, false)
+    }
+
+    pub(crate) fn new_draggable(document: &Document, parent: &Element, text: &str) -> Self {
+        Self::build(document, parent, text, true)
+    }
+}
+
+impl WidgetHandle for WebTextBoxHandle {
+    fn set_pos(&self, x: i32, y: i32) {
+        el_set_pos(self.input.as_ref(), x, y);
+    }
+    fn pos(&self) -> (i32, i32) {
+        el_pos(self.input.as_ref())
+    }
+    fn set_width(&self, width: u32) {
+        el_set_width(self.input.as_ref(), width);
+    }
+    fn width(&self) -> u32 {
+        el_width(self.input.as_ref())
+    }
+    fn set_height(&self, height: u32) {
+        el_set_height(self.input.as_ref(), height);
+    }
+    fn height(&self) -> u32 {
+        el_height(self.input.as_ref())
+    }
+    fn set_on_click(&self, callback: Box<dyn FnMut()>) {
+        el_set_on_click(self.input.as_ref(), callback);
+    }
+    fn set_fore_color(&self, color: Option<Color>) {
+        el_set_fore_color(self.input.as_ref(), color);
+    }
+    fn fore_color(&self) -> Option<Color> {
+        el_fore_color(self.input.as_ref())
+    }
+    fn set_back_color(&self, color: Option<Color>) {
+        el_set_back_color(self.input.as_ref(), color);
+    }
+    fn back_color(&self) -> Option<Color> {
+        el_back_color(self.input.as_ref())
+    }
+}
+
+impl TextBoxHandle for WebTextBoxHandle {
+    fn set_text(&self, text: &str) {
+        self.input.set_value(text);
+    }
+
+    fn text(&self) -> String {
+        self.input.value()
+    }
+}
+
+// --- RadioButton ---
+
+/// A real `<input type="radio">` plus its text, wrapped in a `<label>`,
+/// same native pattern as `WebCheckBoxHandle`. Mutual exclusivity on the
+/// web comes only from a shared `name` attribute, so `group` is baked
+/// into the input's `name` at creation time.
+pub(crate) struct WebRadioButtonHandle {
+    wrapper: HtmlElement,
+    input: HtmlInputElement,
+    text_el: HtmlElement,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+    _suppress_toggle: Option<Closure<dyn FnMut(MouseEvent)>>,
+}
+
+impl WebRadioButtonHandle {
+    fn build(
+        document: &Document,
+        parent: &Element,
+        group: &str,
+        text: &str,
+        checked: bool,
+        draggable: bool,
+    ) -> Self {
+        let wrapper = create_element(document, parent, "label");
+        wrapper.set_class_name("rad-radio-button");
+
+        let input_el = document
+            .create_element("input")
+            .expect("create_element(\"input\")");
+        let input: HtmlInputElement = input_el.dyn_into().expect("<input> is an HtmlInputElement");
+        input.set_type("radio");
+        input.set_name(group);
+        input.set_checked(checked);
+        wrapper.append_child(&input).expect("wrapper is live");
+
+        let text_el_raw = document.create_element("span").expect("create_element(\"span\")");
+        text_el_raw.set_text_content(Some(text));
+        wrapper.append_child(&text_el_raw).expect("wrapper is live");
+        let text_el: HtmlElement = text_el_raw.dyn_into().expect("<span> is an HtmlElement");
+
+        let drag = draggable.then(|| attach_drag(&wrapper));
+        let suppress_toggle = draggable.then(|| suppress_native_toggle(&input));
+        Self { wrapper, input, text_el, _drag: drag, _suppress_toggle: suppress_toggle }
+    }
+
+    pub(crate) fn new(document: &Document, parent: &Element, group: &str, text: &str, checked: bool) -> Self {
+        Self::build(document, parent, group, text, checked, false)
+    }
+
+    pub(crate) fn new_draggable(
+        document: &Document,
+        parent: &Element,
+        group: &str,
+        text: &str,
+        checked: bool,
+    ) -> Self {
+        Self::build(document, parent, group, text, checked, true)
+    }
+}
+
+impl_widget_handle!(WebRadioButtonHandle, wrapper);
+
+impl RadioButtonHandle for WebRadioButtonHandle {
+    fn set_text(&self, text: &str) {
+        self.text_el.set_text_content(Some(text));
+    }
+
+    fn text(&self) -> String {
+        self.text_el.text_content().unwrap_or_default()
+    }
+
+    fn set_checked(&self, checked: bool) {
         self.input.set_checked(checked);
     }
 

@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Form1</title>
+<style>
+  /* Skin-independent: layout the designer depends on, plus the plain look
+     the "Web" option shows (no rad-skin-* class on <html>). Everything
+     platform-flavoured lives in skins.css. */
+  body { margin: 0; background: #f3f3f3; }
+  #rad-stage { position: relative; margin: 16px; }
+
+  .rad-window {
+    border: 1px solid #555;
+    background: #fff;
+    min-width: 160px;
+    min-height: 120px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  }
+  .rad-window-titlebar { background: #e0e0e0; padding: 4px 8px; user-select: none; }
+  .rad-window-body button,
+  .rad-window-body input[type="text"],
+  .rad-window-body > span,
+  .rad-window-body .rad-checkbox,
+  .rad-window-body .rad-radio-button {
+    position: absolute; cursor: move; user-select: none; touch-action: none;
+  }
+  .rad-window-body .rad-checkbox,
+  .rad-window-body .rad-radio-button {
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  }
+
+  /* Design-time selection: dashed box + 8 handles, VS-style. Purely
+     visual for now — pointer-events:none so it never blocks clicks or
+     the drag-to-reposition behavior on whatever it's drawn over. */
+  .rad-selection {
+    position: absolute;
+    display: none;
+    border: 1px dashed #0078d7;
+    pointer-events: none;
+  }
+  .rad-selection.visible { display: block; }
+  .rad-handle {
+    position: absolute;
+    width: 6px; height: 6px;
+    background: #fff;
+    border: 1px solid #0078d7;
+    /* Re-enable events: the overlay itself is pointer-events:none so it
+       doesn't block clicks on what's selected, but the handles need to
+       receive pointerdown/move/up to drive resizing. */
+    pointer-events: auto;
+  }
+  .rad-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
+  .rad-handle.n  { left: 50%; top: -4px; margin-left: -3px; cursor: ns-resize; }
+  .rad-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
+  .rad-handle.e  { right: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+  .rad-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+  .rad-handle.s  { left: 50%; bottom: -4px; margin-left: -3px; cursor: ns-resize; }
+  .rad-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+  .rad-handle.w  { left: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+</style>
+<link rel="stylesheet" href="skins.css" />
+</head>
+<body>
+<div id="rad-stage"></div>
+<!-- Loaded here rather than in index.html so the module's realm is this
+     document's: see the comment on `start()` in src/lib.rs. -->
+<script type="module">
+  import init from "./rad-designer.js";
+  init({ module_or_path: "./rad-designer_bg.wasm" });
+</script>
+</body>
+</html>

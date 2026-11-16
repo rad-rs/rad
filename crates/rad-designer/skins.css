@@ -1,0 +1,164 @@
+/* OS look-and-feel skins for the designer's live form preview.
+
+   Each skin keys off one class on the preview document's <html>, toggled
+   by the designer's "Look & feel" switcher: rad-skin-windows,
+   rad-skin-macos, rad-skin-linux (the same naming rad-backend-web's
+   WebHost uses). "Web" is no class at all, so none of this applies and
+   the browser renders <button>/<input type="checkbox"> natively.
+
+   Constraints every skin keeps, because the designer reads sizes back
+   from offsetWidth/offsetHeight and writes them into generated code:
+   the form's .rad-window border stays 1px, and labels / checkbox
+   wrappers get no padding or border of their own. */
+
+/* ---------------------------------------------------------------- */
+/* Windows — Windows 11: Segoe UI Variable, rounded window corners,   */
+/* flat accent-blue buttons, light titlebar with a thin bottom rule   */
+/* ---------------------------------------------------------------- */
+
+.rad-skin-windows .rad-window {
+  border: 1px solid #d1d1d1; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18), 0 1px 2px rgba(0,0,0,0.12);
+}
+.rad-skin-windows .rad-window-titlebar {
+  position: relative; background: #0078d4; color: #fff;
+  font: 12px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  padding: 8px 100px 8px 12px;
+}
+/* Minimize / maximize / close, decoration only — same reasoning as the
+   macOS skin's traffic lights: drawn, not added as real elements. */
+.rad-skin-windows .rad-window-titlebar::after {
+  content: "\2013   \25A1   \2715"; position: absolute; right: 12px; top: 8px;
+  letter-spacing: 14px; font: 11px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  color: #fff;
+}
+.rad-skin-windows .rad-window-body { background: #f3f3f3; }
+
+.rad-skin-windows .rad-window-body button {
+  font: 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #1b1b1b;
+  background: #fbfbfb; border: 1px solid #d1d1d1; border-radius: 4px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.04);
+  padding: 0 4px;
+}
+.rad-skin-windows .rad-window-body button:hover { background: #f5f5f5; border-color: #c3c3c3; }
+.rad-skin-windows .rad-window-body button:active { background: #e9e9e9; color: #1b1b1b; }
+
+.rad-skin-windows .rad-window-body > span,
+.rad-skin-windows .rad-window-body .rad-checkbox {
+  font: 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #1b1b1b;
+}
+.rad-skin-windows .rad-window-body .rad-checkbox { gap: 7px; }
+
+.rad-skin-windows .rad-checkbox input {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+  width: 16px; height: 16px; border: 1px solid #8b8b8b; border-radius: 4px; background: #fff;
+}
+.rad-skin-windows .rad-checkbox input:hover { border-color: #0067c0; }
+.rad-skin-windows .rad-checkbox input:checked {
+  border-color: #0067c0;
+  background: #0067c0 center / 11px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 8.5l3.5 3.5 7.5-8' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------- */
+/* macOS — Big Sur and later: SF system font, rounded white push      */
+/* buttons, rounded-square accent checkboxes, traffic-light titlebar  */
+/* ---------------------------------------------------------------- */
+
+.rad-skin-macos .rad-window {
+  border: 1px solid rgba(0,0,0,0.22); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15);
+}
+.rad-skin-macos .rad-window-titlebar {
+  position: relative; text-align: center;
+  background: #e8e6e8; color: #4d4d4d;
+  border-bottom: 1px solid #d1d0d1;
+  font: 600 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  padding: 5px 70px;
+}
+/* Close / minimize / zoom: decoration only, drawn rather than added as
+   elements so rad-backend-web's title-bar text handling is untouched. */
+.rad-skin-macos .rad-window-titlebar::before {
+  content: ""; position: absolute; left: 9px; top: 50%;
+  width: 52px; height: 12px; margin-top: -6px;
+  background:
+    radial-gradient(circle at 6px 6px, #ff5f57 5.5px, transparent 6px),
+    radial-gradient(circle at 26px 6px, #febc2e 5.5px, transparent 6px),
+    radial-gradient(circle at 46px 6px, #28c840 5.5px, transparent 6px);
+}
+.rad-skin-macos .rad-window-body { background: #ececec; }
+
+.rad-skin-macos .rad-window-body button {
+  font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #1d1d1f; background: #fff;
+  border: 1px solid #c8c8c8; border-radius: 6px;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+  padding: 0 8px;
+}
+.rad-skin-macos .rad-window-body button:active { background: #e5e5e5; }
+
+.rad-skin-macos .rad-window-body > span,
+.rad-skin-macos .rad-window-body .rad-checkbox {
+  font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #1d1d1f;
+}
+.rad-skin-macos .rad-window-body .rad-checkbox { gap: 6px; }
+
+.rad-skin-macos .rad-checkbox input {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+  width: 14px; height: 14px; border: 1px solid #b5b5b5; border-radius: 4px;
+  background: #fff; box-shadow: inset 0 1px 1px rgba(0,0,0,0.05);
+}
+.rad-skin-macos .rad-checkbox input:checked {
+  border-color: #0068d9;
+  background: #007aff center / 10px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.5 3.5 6.5-8' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------- */
+/* Linux — GNOME / GTK3 Adwaita: Cantarell, warm-gray gradient        */
+/* buttons, a centered bold headerbar, blue checked checkboxes        */
+/* ---------------------------------------------------------------- */
+
+.rad-skin-linux .rad-window {
+  border: 1px solid #b6b6b3; border-radius: 8px 8px 0 0;
+  box-shadow: 0 3px 9px 1px rgba(0,0,0,0.3);
+}
+.rad-skin-linux .rad-window-titlebar {
+  text-align: center; color: #2e3436;
+  background: linear-gradient(to top, #dfdfdd, #e8e8e7);
+  border-bottom: 1px solid #bfb8b1;
+  box-shadow: inset 0 1px rgba(255,255,255,0.8);
+  font: bold 13px Cantarell, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif;
+  padding: 8px;
+}
+.rad-skin-linux .rad-window-body { background: #f6f5f4; }
+
+.rad-skin-linux .rad-window-body button {
+  font: 13px Cantarell, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif; color: #2e3436;
+  background: linear-gradient(to top, #edebe9 2px, #f6f5f4);
+  border: 1px solid #cdc7c2; border-bottom-color: #bfb8b1; border-radius: 4px;
+  box-shadow: inset 0 1px rgba(255,255,255,0.8), 0 1px 2px rgba(0,0,0,0.07);
+  padding: 0 6px;
+}
+.rad-skin-linux .rad-window-body button:hover { background: linear-gradient(to top, #f6f5f4, #f8f8f7 1px); }
+.rad-skin-linux .rad-window-body button:active {
+  background: #d6d1cd; box-shadow: inset 0 1px rgba(0,0,0,0.05);
+}
+
+.rad-skin-linux .rad-window-body > span,
+.rad-skin-linux .rad-window-body .rad-checkbox {
+  font: 13px Cantarell, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif; color: #2e3436;
+}
+.rad-skin-linux .rad-window-body .rad-checkbox { gap: 6px; }
+
+.rad-skin-linux .rad-checkbox input {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+  width: 14px; height: 14px; border: 1px solid #cdc7c2; border-radius: 3px;
+  background: linear-gradient(to top, #edebe9, #fff);
+}
+.rad-skin-linux .rad-checkbox input:checked {
+  border-color: #1b6acb;
+  background: #3584e4 center / 12px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8l3 3 6-6.5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E");
+}
