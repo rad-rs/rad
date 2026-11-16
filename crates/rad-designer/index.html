@@ -166,9 +166,10 @@
   <span class="spacer"></span>
   <span id="build-status"></span>
   <button id="build-button">Build &amp; download</button>
-  <select id="native-arch-select" title="Architecture of the native .exe">
+  <select id="native-arch-select" title="Architecture of the native .exe. ARM64 needs Windows 10 or later on ARM64 hardware to run.">
     <option value="x86_64-pc-windows-gnu" selected>64-bit</option>
     <option value="i686-pc-windows-gnu">32-bit</option>
+    <option value="aarch64-pc-windows-gnullvm">ARM64 (Windows 10+)</option>
   </select>
   <button id="native-build-button" title="Compile to a real, standalone Windows .exe">Build native .exe</button>
   <button id="reset-button" title="Clear all project files and reload">Reset project</button>

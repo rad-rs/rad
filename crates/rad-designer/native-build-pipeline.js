@@ -27,8 +27,17 @@ const CACHE_NAME = "rad-native-build-toolchain-v3";
 
 /** Targets a toolchain can serve. The compiler (`rustc_opt.wasm`) is shared;
  *  everything target-specific lives in `native-toolchain/<triple>/`:
- *  `crt2.o`, `mingw-libs/` and `sysroot/`, each with `index.json` manifests. */
-export const NATIVE_TARGETS = ["x86_64-pc-windows-gnu", "i686-pc-windows-gnu"];
+ *  `crt2.o`, `mingw-libs/` and `sysroot/`, each with `index.json` manifests.
+ *
+ *  `rsObjects`: whether the sysroot carries `rsbegin.o`/`rsend.o`. The
+ *  `*-windows-gnu` targets link them; `*-windows-gnullvm` does not (its only
+ *  self-contained object is `crt2.o`), so fetching them there would 404. */
+const TARGET_INFO = {
+  "x86_64-pc-windows-gnu": { rsObjects: true },
+  "i686-pc-windows-gnu": { rsObjects: true },
+  "aarch64-pc-windows-gnullvm": { rsObjects: false },
+};
+export const NATIVE_TARGETS = Object.keys(TARGET_INFO);
 
 async function cachedFetch(url, onProgress) {
   const cache = await caches.open(CACHE_NAME);
@@ -108,12 +117,14 @@ export async function buildNativeApp(files, triple, onProgress) {
       libDir.set(`${stem}.rmeta`, new File(rmeta));
     }),
   );
-  const [rsbegin, rsend] = await Promise.all([
-    cachedFetch(`${TARGET_BASE}sysroot/rsbegin.o`, onProgress),
-    cachedFetch(`${TARGET_BASE}sysroot/rsend.o`, onProgress),
-  ]);
-  libDir.set("rsbegin.o", new File(rsbegin));
-  libDir.set("rsend.o", new File(rsend));
+  if (TARGET_INFO[triple].rsObjects) {
+    const [rsbegin, rsend] = await Promise.all([
+      cachedFetch(`${TARGET_BASE}sysroot/rsbegin.o`, onProgress),
+      cachedFetch(`${TARGET_BASE}sysroot/rsend.o`, onProgress),
+    ]);
+    libDir.set("rsbegin.o", new File(rsbegin));
+    libDir.set("rsend.o", new File(rsend));
+  }
   libDir.set("self-contained", new Directory(new Map([["crt2.o", new File(mingwCrt2)]])));
 
   const mingwStems = await fetchManifest(TARGET_BASE, "mingw-libs/index.json");

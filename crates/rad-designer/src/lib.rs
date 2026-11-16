@@ -1364,6 +1364,8 @@ async fn run_native_build(chrome: Document, window: Rc<WebWindow>) {
     let triple = chrome_element::<HtmlSelectElement>(&chrome, "native-arch-select").value();
     let (arch_label, exe_name) = if triple.starts_with("i686") {
         ("32-bit", "form1-x86.exe")
+    } else if triple.starts_with("aarch64") {
+        ("ARM64", "form1-arm64.exe")
     } else {
         ("64-bit", "form1.exe")
     };
