@@ -35,9 +35,22 @@ const CACHE_NAME = "rad-native-build-toolchain-v3";
 const TARGET_INFO = {
   "x86_64-pc-windows-gnu": { rsObjects: true },
   "i686-pc-windows-gnu": { rsObjects: true },
+  "x86_64-pc-windows-gnullvm": { rsObjects: false },
+  "i686-pc-windows-gnullvm": { rsObjects: false },
   "aarch64-pc-windows-gnullvm": { rsObjects: false },
 };
 export const NATIVE_TARGETS = Object.keys(TARGET_INFO);
+
+/** A static server that falls back to its HTML page for unknown paths (the
+ *  `trunk serve` dev server does) answers a missing toolchain file with HTTP 200
+ *  and a web page; no toolchain file is ever HTML, so treat that as missing. */
+function isHtmlFallback(response) {
+  return (response.headers.get("content-type") || "").includes("text/html");
+}
+
+function describeMissing(response) {
+  return response.ok ? "the server returned a web page instead" : `HTTP ${response.status}`;
+}
 
 async function cachedFetch(url, onProgress) {
   const cache = await caches.open(CACHE_NAME);
@@ -45,7 +58,9 @@ async function cachedFetch(url, onProgress) {
   if (cached) return new Uint8Array(await cached.arrayBuffer());
   onProgress?.(`Downloading ${url.split("/").pop()}...`);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`fetch ${url} failed: ${response.status}`);
+  if (!response.ok || isHtmlFallback(response)) {
+    throw new Error(`toolchain file ${url} is missing (${describeMissing(response)})`);
+  }
   await cache.put(url, response.clone());
   return new Uint8Array(await response.arrayBuffer());
 }
@@ -82,7 +97,9 @@ function runWorker(farmRef, rustcWasmBytes, args) {
  *  libraries the linker may ask for, depend on the compiler version. */
 async function fetchManifest(base, path) {
   const response = await fetch(`${base}${path}`);
-  if (!response.ok) throw new Error(`toolchain is missing ${base}${path} (HTTP ${response.status})`);
+  if (!response.ok || isHtmlFallback(response)) {
+    throw new Error(`toolchain is missing ${base}${path} (${describeMissing(response)})`);
+  }
   return response.json();
 }
 

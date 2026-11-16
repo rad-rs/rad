@@ -1197,31 +1197,25 @@ pub fn start() {
         .ok();
     on_skin_change.forget();
 
+    // One Build button; `#build-target` says what it builds. Its values are
+    // "web" or a native rustc target triple (see `build_target_info`).
     let build_button: HtmlElement = chrome_element(&chrome, "build-button");
     let on_build_click = {
         let chrome = chrome.clone();
         let window = window.clone();
         Closure::wrap(Box::new(move |_: MouseEvent| {
-            wasm_bindgen_futures::spawn_local(run_build(chrome.clone(), window.clone()));
+            let target = chrome_element::<HtmlSelectElement>(&chrome, "build-target").value();
+            if target == "web" {
+                wasm_bindgen_futures::spawn_local(run_build(chrome.clone(), window.clone()));
+            } else {
+                wasm_bindgen_futures::spawn_local(run_native_build(chrome.clone(), window.clone(), target));
+            }
         }) as Box<dyn FnMut(MouseEvent)>)
     };
     build_button
         .add_event_listener_with_callback("click", on_build_click.as_ref().unchecked_ref())
         .ok();
     on_build_click.forget();
-
-    let native_build_button: HtmlElement = chrome_element(&chrome, "native-build-button");
-    let on_native_build_click = {
-        let chrome = chrome.clone();
-        let window = window.clone();
-        Closure::wrap(Box::new(move |_: MouseEvent| {
-            wasm_bindgen_futures::spawn_local(run_native_build(chrome.clone(), window.clone()));
-        }) as Box<dyn FnMut(MouseEvent)>)
-    };
-    native_build_button
-        .add_event_listener_with_callback("click", on_native_build_click.as_ref().unchecked_ref())
-        .ok();
-    on_native_build_click.forget();
 
     let console_close_button: HtmlElement = chrome_element(&chrome, "build-console-close");
     let on_console_close_click = {
@@ -1258,6 +1252,23 @@ pub fn start() {
     std::mem::forget(window);
 }
 
+/// What each `#build-target` option builds: a human-readable label for status
+/// and console messages, and the name of the downloaded file. The values are
+/// "web" or a rustc target triple served by `native-build-pipeline.js`
+/// (`NATIVE_TARGETS` there must list every triple here).
+fn build_target_info(value: &str) -> (&'static str, &'static str) {
+    match value {
+        "web" => ("web app", "form1.html"),
+        "x86_64-pc-windows-gnu" => ("Windows x64 (MSVCRT)", "form1-x64.exe"),
+        "i686-pc-windows-gnu" => ("Windows x86 (MSVCRT)", "form1-x86.exe"),
+        "x86_64-pc-windows-gnullvm" => ("Windows x64 (UCRT)", "form1-x64-ucrt.exe"),
+        "i686-pc-windows-gnullvm" => ("Windows x86 (UCRT)", "form1-x86-ucrt.exe"),
+        "aarch64-pc-windows-gnullvm" => ("Windows ARM64 (UCRT)", "form1-arm64.exe"),
+        // Unknown value: build_native_app rejects it with a clear message.
+        _ => ("unknown target", "form1.exe"),
+    }
+}
+
 /// Compiles the project currently in `files` (see that module) through
 /// the in-browser toolchain (`build-pipeline.js`, `rad-backend-web-min`)
 /// and downloads the result as a standalone `.html` — see `build.rs`'s
@@ -1265,9 +1276,11 @@ pub fn start() {
 /// `rad-backend-web`/`wasm-bindgen`-based backend.
 async fn run_build(chrome: Document, window: Rc<WebWindow>) {
     let status: HtmlElement = chrome_element(&chrome, "build-status");
-    status.set_text_content(Some("Building..."));
+    let (label, file_name) = build_target_info("web");
+    let starting = format!("Building {label}...");
+    status.set_text_content(Some(&starting));
     open_console(&chrome);
-    log_console(&chrome, "Building...");
+    log_console(&chrome, &starting);
 
     let form1_rs = files::read("form1.rs").unwrap_or_else(initial_form1_rs);
     let form1_designer_rs = files::read("form1.designer.rs").unwrap_or_default();
@@ -1290,9 +1303,10 @@ async fn run_build(chrome: Document, window: Rc<WebWindow>) {
         Ok(value) => {
             let bytes = js_sys::Uint8Array::new(&value).to_vec();
             let html = build::generate_standalone_html(&bytes, &build::runtime_js());
-            status.set_text_content(Some("Downloading form1.html..."));
-            log_console(&chrome, "Downloading form1.html...");
-            trigger_download(&chrome, "form1.html", &html);
+            let downloading = format!("Downloading {file_name}...");
+            status.set_text_content(Some(&downloading));
+            log_console(&chrome, &downloading);
+            trigger_download(&chrome, file_name, &html);
             status.set_text_content(Some("Build complete."));
             log_console(&chrome, "Build complete.");
         }
@@ -1354,22 +1368,13 @@ fn trigger_download_bytes(document: &Document, filename: &str, content: &[u8]) {
     Url::revoke_object_url(&url).ok();
 }
 
-/// Mirrors `run_build`, compiling the same project to a native `.exe`
-/// instead of a downloadable `.wasm`/`.html` — see `native_build.rs` and
+/// Mirrors `run_build`, compiling the same project to a native `.exe` for
+/// `triple` instead of a downloadable `.html` — see `native_build.rs` and
 /// `native_build_pipeline` for the rest of this path.
-async fn run_native_build(chrome: Document, window: Rc<WebWindow>) {
+async fn run_native_build(chrome: Document, window: Rc<WebWindow>, triple: String) {
     let status: HtmlElement = chrome_element(&chrome, "build-status");
-    // `#native-arch-select`'s values are the rustc target triples the
-    // toolchain serves (see `NATIVE_TARGETS` in `native-build-pipeline.js`).
-    let triple = chrome_element::<HtmlSelectElement>(&chrome, "native-arch-select").value();
-    let (arch_label, exe_name) = if triple.starts_with("i686") {
-        ("32-bit", "form1-x86.exe")
-    } else if triple.starts_with("aarch64") {
-        ("ARM64", "form1-arm64.exe")
-    } else {
-        ("64-bit", "form1.exe")
-    };
-    let starting = format!("Building native {arch_label} .exe...");
+    let (label, exe_name) = build_target_info(&triple);
+    let starting = format!("Building for {label}...");
     status.set_text_content(Some(&starting));
     open_console(&chrome);
     log_console(&chrome, &starting);
@@ -1409,7 +1414,7 @@ async fn run_native_build(chrome: Document, window: Rc<WebWindow>) {
         Err(err) => {
             web_sys::console::error_1(&err);
             log_console(&chrome, &js_error_text(&err));
-            status.set_text_content(Some("Native build failed — see console below."));
+            status.set_text_content(Some(&format!("Build for {label} failed — see console below.")));
         }
     }
 }

@@ -51,6 +51,11 @@
   }
   #bar .spacer { flex: 1; }
   #bar select { font: 12px "Segoe UI", sans-serif; }
+  /* The title gives way first, so the bar never wraps at narrow widths. */
+  #bar .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bar #build-status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bar #build-target { flex: 0 0 auto; }
+  #bar button, #bar label { flex: 0 0 auto; white-space: nowrap; }
 
   #tab-bar { display: flex; flex: 0 0 auto; background: #ddd; border-bottom: 1px solid #bbb; }
   .tab {
@@ -162,16 +167,24 @@
 </head>
 <body>
 <div id="bar">
-  <span>rad-designer — drag a control onto the form, double-click it for its handler</span>
+  <span class="title">rad-designer — drag a control onto the form, double-click it for its handler</span>
   <span class="spacer"></span>
   <span id="build-status"></span>
-  <button id="build-button">Build &amp; download</button>
-  <select id="native-arch-select" title="Architecture of the native .exe. ARM64 needs Windows 10 or later on ARM64 hardware to run.">
-    <option value="x86_64-pc-windows-gnu" selected>64-bit</option>
-    <option value="i686-pc-windows-gnu">32-bit</option>
-    <option value="aarch64-pc-windows-gnullvm">ARM64 (Windows 10+)</option>
+  <select id="build-target" title="What to build. Every Windows target needs Windows 10 or later. MSVCRT = classic MinGW runtime; UCRT = Universal C Runtime with an all-LLVM toolchain. ARM64 needs ARM64 hardware to run.">
+    <optgroup label="Browser">
+      <option value="web">Web app (.html)</option>
+    </optgroup>
+    <optgroup label="Windows 10+ — MinGW runtime (MSVCRT)">
+      <option value="x86_64-pc-windows-gnu" selected>x64 · MSVCRT</option>
+      <option value="i686-pc-windows-gnu">x86 · MSVCRT</option>
+    </optgroup>
+    <optgroup label="Windows 10+ — LLVM runtime (UCRT)">
+      <option value="x86_64-pc-windows-gnullvm">x64 · UCRT</option>
+      <option value="i686-pc-windows-gnullvm">x86 · UCRT</option>
+      <option value="aarch64-pc-windows-gnullvm">ARM64 · UCRT</option>
+    </optgroup>
   </select>
-  <button id="native-build-button" title="Compile to a real, standalone Windows .exe">Build native .exe</button>
+  <button id="build-button" title="Build the form for the selected target and download it">Build</button>
   <button id="reset-button" title="Clear all project files and reload">Reset project</button>
   <label>Look &amp; feel
     <select id="skin-select">
@@ -247,6 +260,23 @@
   </div>
   <pre id="build-console-log"></pre>
 </div>
+<script>
+// Remember the last chosen build target. Only a value that is still one of the
+// options is restored, and every storage access is guarded.
+(function () {
+  var select = document.getElementById("build-target");
+  var KEY = "rad-designer.build-target";
+  try {
+    var saved = localStorage.getItem(KEY);
+    if (saved && Array.prototype.some.call(select.options, function (o) { return o.value === saved; })) {
+      select.value = saved;
+    }
+  } catch (e) { /* storage unavailable: keep the default */ }
+  select.addEventListener("change", function () {
+    try { localStorage.setItem(KEY, select.value); } catch (e) {}
+  });
+})();
+</script>
 <script>
 // Vertical resize for the build console: drag its top edge. The height is
 // remembered per browser (localStorage may be unavailable, so every access is
