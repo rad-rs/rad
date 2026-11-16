@@ -1259,11 +1259,9 @@ pub fn start() {
 fn build_target_info(value: &str) -> (&'static str, &'static str) {
     match value {
         "web" => ("web app", "form1.html"),
-        "x86_64-pc-windows-gnu" => ("Windows x64 (MSVCRT)", "form1-x64.exe"),
-        "i686-pc-windows-gnu" => ("Windows x86 (MSVCRT)", "form1-x86.exe"),
-        "x86_64-pc-windows-gnullvm" => ("Windows x64 (UCRT)", "form1-x64-ucrt.exe"),
-        "i686-pc-windows-gnullvm" => ("Windows x86 (UCRT)", "form1-x86-ucrt.exe"),
-        "aarch64-pc-windows-gnullvm" => ("Windows ARM64 (UCRT)", "form1-arm64.exe"),
+        "x86_64-pc-windows-gnullvm" => ("Windows x64", "form1-x64.exe"),
+        "i686-pc-windows-gnullvm" => ("Windows x86", "form1-x86.exe"),
+        "aarch64-pc-windows-gnullvm" => ("Windows ARM64", "form1-arm64.exe"),
         // Unknown value: build_native_app rejects it with a clear message.
         _ => ("unknown target", "form1.exe"),
     }

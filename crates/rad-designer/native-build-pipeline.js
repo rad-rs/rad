@@ -30,11 +30,9 @@ const CACHE_NAME = "rad-native-build-toolchain-v3";
  *  `crt2.o`, `mingw-libs/` and `sysroot/`, each with `index.json` manifests.
  *
  *  `rsObjects`: whether the sysroot carries `rsbegin.o`/`rsend.o`. The
- *  `*-windows-gnu` targets link them; `*-windows-gnullvm` does not (its only
- *  self-contained object is `crt2.o`), so fetching them there would 404. */
+ *  `*-windows-gnullvm` targets do not (their only self-contained object is
+ *  `crt2.o`), so fetching them would 404; a target that needs them sets this. */
 const TARGET_INFO = {
-  "x86_64-pc-windows-gnu": { rsObjects: true },
-  "i686-pc-windows-gnu": { rsObjects: true },
   "x86_64-pc-windows-gnullvm": { rsObjects: false },
   "i686-pc-windows-gnullvm": { rsObjects: false },
   "aarch64-pc-windows-gnullvm": { rsObjects: false },

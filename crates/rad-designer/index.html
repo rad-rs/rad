@@ -170,18 +170,14 @@
   <span class="title">rad-designer — drag a control onto the form, double-click it for its handler</span>
   <span class="spacer"></span>
   <span id="build-status"></span>
-  <select id="build-target" title="What to build. Every Windows target needs Windows 10 or later. MSVCRT = classic MinGW runtime; UCRT = Universal C Runtime with an all-LLVM toolchain. ARM64 needs ARM64 hardware to run.">
+  <select id="build-target" title="What to build. Windows builds need Windows 10 or later; the ARM64 build needs ARM64 hardware to run.">
     <optgroup label="Browser">
       <option value="web">Web app (.html)</option>
     </optgroup>
-    <optgroup label="Windows 10+ — MinGW runtime (MSVCRT)">
-      <option value="x86_64-pc-windows-gnu" selected>x64 · MSVCRT</option>
-      <option value="i686-pc-windows-gnu">x86 · MSVCRT</option>
-    </optgroup>
-    <optgroup label="Windows 10+ — LLVM runtime (UCRT)">
-      <option value="x86_64-pc-windows-gnullvm">x64 · UCRT</option>
-      <option value="i686-pc-windows-gnullvm">x86 · UCRT</option>
-      <option value="aarch64-pc-windows-gnullvm">ARM64 · UCRT</option>
+    <optgroup label="Windows 10+">
+      <option value="x86_64-pc-windows-gnullvm" selected>Windows x64</option>
+      <option value="i686-pc-windows-gnullvm">Windows x86</option>
+      <option value="aarch64-pc-windows-gnullvm">Windows ARM64</option>
     </optgroup>
   </select>
   <button id="build-button" title="Build the form for the selected target and download it">Build</button>
