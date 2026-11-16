@@ -33,7 +33,7 @@ All of `rad-core` and the backend are mounted as sibling `mod` files of a single
 
 ### Toolchain is not in this repo
 
-The native `.exe` build needs a patched wasm-hosted `rustc` (about 100 MB), a matching Windows sysroot and MinGW runtime files, expected under `crates/rad-designer/native-toolchain/`. They are ignored by git. See the recipe repository (to be linked here) for how they are produced. The web-app build downloads its toolchain from a public host on first use and caches it in the browser.
+The native `.exe` build needs a patched wasm-hosted `rustc` (about 100 MB), a matching Windows sysroot and MinGW runtime files, expected under `crates/rad-designer/native-toolchain/`. They are ignored by git. See [rad-rs/wasm-rustc-windows](https://github.com/rad-rs/wasm-rustc-windows) for how they are produced. The web-app build downloads its toolchain from a public host on first use and caches it in the browser.
 
 ## Status
 
