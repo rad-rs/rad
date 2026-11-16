@@ -1,11 +1,14 @@
-//! Real native Windows demo: a Form1 with one Button, built entirely on
-//! `rad-backend-win32` — no WASM, no browser, just a normal `cargo build`
-//! producing a real `.exe`. `rad-backend-win32::Win32Backend` only creates
-//! the window; running it needs the usual Win32 message loop, which this
-//! entry point owns (same role `rad-demo`'s wasm entry point plays for
-//! the browser backend).
+//! Native Windows build of the all-controls demo: the same `Form1` that
+//! `rad-demo` shows in the browser, on `rad-backend-win32`. No WASM, no
+//! browser, just a normal `cargo build` producing a real `.exe`. The
+//! backend only creates the window; running it needs the usual Win32
+//! message loop, which this entry point owns.
 
-use rad_core::{Button, Window};
+#[path = "../../rad-demo/src/form1.rs"]
+mod form1;
+
+use rad_core::Window;
+
 // The backend has no external dependencies, so the message loop is declared
 // by hand too. `MSG` is 48 bytes; `[usize; 7]` (56) is correctly aligned and
 // large enough, since the OS only writes within the real struct's bounds.
@@ -18,19 +21,8 @@ unsafe extern "system" {
 
 fn main() {
     let backend = rad_backend_win32::Win32Backend;
-    let window = Window::new(&backend, "Form1", 400, 260);
-
-    let button = Button::new(&window, "Click me");
-    button.set_pos(20, 20);
-    button.set_width(100);
-    button.set_height(32);
-    button.set_on_click(Box::new(|| {
-        println!("Button clicked!");
-    }));
-
-    window.on_click(|| {
-        println!("Form clicked!");
-    });
+    let window = Window::new(&backend, "All controls demo", 460, 410);
+    let controls = form1::build(&window);
 
     unsafe {
         let mut msg: [usize; 7] = [0; 7];
@@ -40,6 +32,6 @@ fn main() {
         }
     }
 
+    std::mem::forget(controls);
     std::mem::forget(window);
-    std::mem::forget(button);
 }

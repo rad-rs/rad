@@ -23,7 +23,7 @@ import {
 import { WASIFarm } from "/vendor/browser_wasi_shim_threads/browser-wasi-shim-threads.es.js";
 
 const TOOLCHAIN_BASE = "/native-toolchain/";
-const CACHE_NAME = "rad-native-build-toolchain-v1";
+const CACHE_NAME = "rad-native-build-toolchain-v2";
 
 async function cachedFetch(url, onProgress) {
   const cache = await caches.open(CACHE_NAME);
@@ -63,19 +63,14 @@ function runWorker(farmRef, rustcWasmBytes, args) {
   });
 }
 
-const SYSROOT_RLIBS = [
-  "libaddr2line", "libadler", "liballoc", "libcfg_if", "libcompiler_builtins", "libcore",
-  "libgetopts", "libgimli", "libhashbrown", "liblibc", "libmemchr", "libminiz_oxide",
-  "libobject", "libpanic_abort", "libpanic_unwind", "libproc_macro", "librustc_demangle",
-  "librustc_std_workspace_alloc", "librustc_std_workspace_core", "librustc_std_workspace_std",
-  "libstd", "libstd_detect", "libsysroot", "libtest", "libunicode_width", "libunwind",
-  "libwindows_targets",
-];
-const MINGW_LIBS = [
-  "libadvapi32", "libcomctl32", "libdbghelp", "libgcc", "libgcc_eh", "libgdi32", "libkernel32",
-  "libmingw32", "libmingwex", "libmsvcrt", "libntdll", "libpthread", "libuser32", "libuserenv",
-  "libwinpthread", "libws2_32",
-];
+/** A toolchain lists its own files in `index.json` manifests (an array of
+ *  file stems): which crates make up the sysroot, and which import
+ *  libraries the linker may ask for, depend on the compiler version. */
+async function fetchManifest(path) {
+  const response = await fetch(`${TOOLCHAIN_BASE}${path}`);
+  if (!response.ok) throw new Error(`toolchain is missing ${path} (HTTP ${response.status})`);
+  return response.json();
+}
 
 /**
  * Compiles `files` (a `Map`/plain-object of mount path -> source text,
@@ -89,11 +84,19 @@ export async function buildNativeApp(files, onProgress) {
     cachedFetch(`${TOOLCHAIN_BASE}mingw_crt2.o`, onProgress),
   ]);
 
+  // Each `.rlib` is only a metadata stub; current rustc needs its sibling
+  // `.rmeta` next to it. A missing file fails the build loudly here, not as
+  // an obscure rustc error later.
+  const stems = await fetchManifest("sysroot/index.json");
   const libDir = new Map();
   await Promise.all(
-    SYSROOT_RLIBS.map(async (stem) => {
-      const bytes = await cachedFetch(`${TOOLCHAIN_BASE}sysroot/${stem}.rlib`, onProgress).catch(() => null);
-      if (bytes) libDir.set(`${stem}.rlib`, new File(bytes));
+    stems.map(async (stem) => {
+      const [rlib, rmeta] = await Promise.all([
+        cachedFetch(`${TOOLCHAIN_BASE}sysroot/${stem}.rlib`, onProgress),
+        cachedFetch(`${TOOLCHAIN_BASE}sysroot/${stem}.rmeta`, onProgress),
+      ]);
+      libDir.set(`${stem}.rlib`, new File(rlib));
+      libDir.set(`${stem}.rmeta`, new File(rmeta));
     }),
   );
   const [rsbegin, rsend] = await Promise.all([
@@ -104,11 +107,12 @@ export async function buildNativeApp(files, onProgress) {
   libDir.set("rsend.o", new File(rsend));
   libDir.set("self-contained", new Directory(new Map([["crt2.o", new File(mingwCrt2)]])));
 
+  const mingwStems = await fetchManifest("mingw-libs/index.json");
   const mingwLibDir = new Map();
   await Promise.all(
-    MINGW_LIBS.map(async (stem) => {
-      const bytes = await cachedFetch(`${TOOLCHAIN_BASE}mingw-libs/${stem}.a`, onProgress).catch(() => null);
-      if (bytes) mingwLibDir.set(`${stem}.a`, new File(bytes));
+    mingwStems.map(async (stem) => {
+      const bytes = await cachedFetch(`${TOOLCHAIN_BASE}mingw-libs/${stem}.a`, onProgress);
+      mingwLibDir.set(`${stem}.a`, new File(bytes));
     }),
   );
 
