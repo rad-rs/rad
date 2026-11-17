@@ -160,6 +160,55 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{connect, cstr, ffi, impl_widget_handle, programmatic, GtkBase, Parent};
+    use std::cell::RefCell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn ComboBoxHandle> {
+        let widget = unsafe { ffi::gtk_combo_box_text_new() };
+        // A selection change is the control's click, as on Win32.
+        let base = GtkBase::new(parent, widget, Some("changed"));
+        connect(widget, "changed", &base.change);
+        Box::new(Handle { base, items: RefCell::new(Vec::new()) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+        items: RefCell<Vec<String>>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl ComboBoxHandle for Handle {
+        fn set_items(&self, items: &[String]) {
+            *self.items.borrow_mut() = items.to_vec();
+            programmatic(|| unsafe {
+                ffi::gtk_combo_box_text_remove_all(self.base.widget);
+                for item in items {
+                    ffi::gtk_combo_box_text_append_text(self.base.widget, cstr(item).as_ptr());
+                }
+            });
+        }
+        fn items(&self) -> Vec<String> {
+            self.items.borrow().clone()
+        }
+        fn set_selected_index(&self, index: Option<usize>) {
+            let index = match index {
+                Some(i) if i < self.items.borrow().len() => i as i32,
+                _ => -1,
+            };
+            programmatic(|| unsafe { ffi::gtk_combo_box_set_active(self.base.widget, index) });
+        }
+        fn selected_index(&self) -> Option<usize> {
+            let active = unsafe { ffi::gtk_combo_box_get_active(self.base.widget) };
+            if active < 0 { None } else { Some(active as usize) }
+        }
+        fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+            self.base.change.set(callback);
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

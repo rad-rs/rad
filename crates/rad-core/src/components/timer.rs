@@ -253,6 +253,111 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{ffi, Parent};
+    use std::cell::{Cell, RefCell};
+    use std::ffi::c_void;
+    use std::rc::Rc;
+
+    /// What a tick needs, shared between a `Handle` and the GLib source.
+    struct Shared {
+        callback: RefCell<Option<Box<dyn FnMut()>>>,
+        /// Cleared when the timer is dropped, so a tick mid-flight does not put its callback back.
+        alive: Cell<bool>,
+    }
+
+    unsafe extern "C" fn tick(data: *mut c_void) -> i32 {
+        // Our own strong reference for the duration of the tick: the source's
+        // (released by its destroy notify) may go if the callback disables the timer.
+        let shared = unsafe {
+            Rc::increment_strong_count(data as *const Shared);
+            Rc::from_raw(data as *const Shared)
+        };
+        // Taken out while it runs, so it may stop the timer, change the
+        // interval or install a replacement callback without a re-entrancy panic.
+        let taken = shared.callback.borrow_mut().take();
+        if let Some(mut callback) = taken {
+            callback();
+            if shared.alive.get() && shared.callback.borrow().is_none() {
+                *shared.callback.borrow_mut() = Some(callback);
+            }
+        }
+        1 // keep going until the handle removes the source
+    }
+
+    unsafe extern "C" fn release(data: *mut c_void) {
+        drop(unsafe { Rc::from_raw(data as *const Shared) });
+    }
+
+    pub(super) fn create(_parent: &Parent) -> Box<dyn TimerHandle> {
+        crate::platform::gtk::init_once();
+        // WinForms defaults: disabled, 100 ms.
+        Box::new(Handle {
+            shared: Rc::new(Shared { callback: RefCell::new(None), alive: Cell::new(true) }),
+            interval_ms: Cell::new(100),
+            enabled: Cell::new(false),
+            source: Cell::new(0),
+        })
+    }
+
+    struct Handle {
+        shared: Rc<Shared>,
+        interval_ms: Cell<u32>,
+        enabled: Cell<bool>,
+        /// The GLib source id, 0 when not running.
+        source: Cell<u32>,
+    }
+
+    impl Handle {
+        fn arm(&self) {
+            self.disarm();
+            let data = Rc::into_raw(self.shared.clone()) as *mut c_void;
+            let id = unsafe { ffi::g_timeout_add_full(0, self.interval_ms.get().max(1), tick, data, Some(release)) };
+            self.source.set(id);
+        }
+        fn disarm(&self) {
+            let id = self.source.replace(0);
+            if id != 0 {
+                unsafe { ffi::g_source_remove(id) };
+            }
+        }
+    }
+
+    impl TimerHandle for Handle {
+        fn set_interval(&self, interval_ms: u32) {
+            self.interval_ms.set(interval_ms);
+            if self.enabled.get() {
+                self.arm();
+            }
+        }
+        fn interval(&self) -> u32 {
+            self.interval_ms.get()
+        }
+        fn set_enabled(&self, enabled: bool) {
+            if enabled == self.enabled.get() {
+                return;
+            }
+            self.enabled.set(enabled);
+            if enabled { self.arm() } else { self.disarm() }
+        }
+        fn enabled(&self) -> bool {
+            self.enabled.get()
+        }
+        fn set_on_tick(&self, callback: Box<dyn FnMut()>) {
+            *self.shared.callback.borrow_mut() = Some(callback);
+        }
+    }
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            self.shared.alive.set(false);
+            self.disarm();
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

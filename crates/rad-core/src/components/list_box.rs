@@ -164,6 +164,70 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{connect, cstr, ffi, impl_widget_handle, programmatic, scrolled_around, GtkBase, Parent};
+    use std::cell::RefCell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn ListBoxHandle> {
+        // The list lives in a bordered scrolled window, which is what sits on the form.
+        let list = unsafe { ffi::gtk_list_box_new() };
+        let base = GtkBase::new(parent, scrolled_around(list), None);
+        connect(list, "selected-rows-changed", &base.change);
+        // As on Win32, a selection change is also the control's click.
+        connect(list, "selected-rows-changed", &base.click);
+        Box::new(Handle { base, list, items: RefCell::new(Vec::new()) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+        list: *mut ffi::GtkWidget,
+        items: RefCell<Vec<String>>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl ListBoxHandle for Handle {
+        fn set_items(&self, items: &[String]) {
+            *self.items.borrow_mut() = items.to_vec();
+            programmatic(|| unsafe {
+                let children = ffi::gtk_container_get_children(self.list);
+                let mut node = children as *const [*mut std::ffi::c_void; 2];
+                while !node.is_null() {
+                    // GList: { data, next, prev }
+                    ffi::gtk_widget_destroy((*node)[0]);
+                    node = (*node)[1] as *const _;
+                }
+                ffi::g_list_free(children);
+                for item in items {
+                    let label = ffi::gtk_label_new(cstr(item).as_ptr());
+                    ffi::gtk_label_set_xalign(label, 0.0);
+                    ffi::gtk_widget_set_halign(label, ffi::GTK_ALIGN_START);
+                    ffi::gtk_list_box_insert(self.list, label, -1);
+                }
+                ffi::gtk_widget_show_all(self.list);
+            });
+        }
+        fn items(&self) -> Vec<String> {
+            self.items.borrow().clone()
+        }
+        fn set_selected_index(&self, index: Option<usize>) {
+            programmatic(|| unsafe {
+                match index.filter(|i| *i < self.items.borrow().len()) {
+                    Some(i) => ffi::gtk_list_box_select_row(self.list, ffi::gtk_list_box_get_row_at_index(self.list, i as i32)),
+                    None => ffi::gtk_list_box_unselect_all(self.list),
+                }
+            });
+        }
+        fn selected_index(&self) -> Option<usize> {
+            let row = unsafe { ffi::gtk_list_box_get_selected_row(self.list) };
+            if row.is_null() { None } else { Some(unsafe { ffi::gtk_list_box_row_get_index(row) } as usize) }
+        }
+        fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+            self.base.change.set(callback);
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

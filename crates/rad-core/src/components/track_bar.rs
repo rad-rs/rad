@@ -175,6 +175,78 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{connect, ffi, impl_widget_handle, programmatic, GtkBase, Parent};
+    use std::cell::Cell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn TrackBarHandle> {
+        let widget = unsafe { ffi::gtk_scale_new_with_range(ffi::GTK_ORIENTATION_HORIZONTAL, 0.0, 100.0, 1.0) };
+        unsafe {
+            ffi::gtk_scale_set_draw_value(widget, 0);
+            ffi::gtk_range_set_increments(widget, 1.0, 10.0);
+        }
+        let base = GtkBase::new(parent, widget, None);
+        // "value-changed" also fires for code-driven changes; `programmatic` mutes those.
+        connect(widget, "value-changed", &base.change);
+        let handle = Handle { base, min: Cell::new(0), max: Cell::new(100) };
+        handle.apply_range();
+        Box::new(handle)
+    }
+
+    struct Handle {
+        base: GtkBase,
+        min: Cell<i32>,
+        max: Cell<i32>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl Handle {
+        /// Applies the range and spaces tick marks about ten across it (never
+        /// closer than one unit), as the Win32 trackbar does.
+        fn apply_range(&self) {
+            let (min, max) = (self.min.get(), self.max.get().max(self.min.get()));
+            programmatic(|| unsafe {
+                ffi::gtk_range_set_range(self.base.widget, min as f64, max as f64);
+                ffi::gtk_scale_clear_marks(self.base.widget);
+                let step = ((max - min) / 10).max(1);
+                let mut mark = min;
+                while mark <= max {
+                    ffi::gtk_scale_add_mark(self.base.widget, mark as f64, ffi::GTK_POS_BOTTOM, std::ptr::null());
+                    mark += step;
+                }
+            });
+        }
+    }
+
+    impl TrackBarHandle for Handle {
+        fn set_minimum(&self, minimum: i32) {
+            self.min.set(minimum);
+            self.apply_range();
+        }
+        fn minimum(&self) -> i32 {
+            self.min.get()
+        }
+        fn set_maximum(&self, maximum: i32) {
+            self.max.set(maximum);
+            self.apply_range();
+        }
+        fn maximum(&self) -> i32 {
+            self.max.get()
+        }
+        fn set_value(&self, value: i32) {
+            // The range clamps to its bounds itself.
+            programmatic(|| unsafe { ffi::gtk_range_set_value(self.base.widget, value as f64) });
+        }
+        fn value(&self) -> i32 {
+            unsafe { ffi::gtk_range_get_value(self.base.widget).round() as i32 }
+        }
+        fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+            self.base.change.set(callback);
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

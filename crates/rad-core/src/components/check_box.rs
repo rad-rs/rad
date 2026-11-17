@@ -126,6 +126,36 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, ffi, from_c, impl_widget_handle, programmatic, GtkBase, Parent};
+
+    pub(super) fn create(parent: &Parent, text: &str) -> Box<dyn CheckBoxHandle> {
+        let widget = unsafe { ffi::gtk_check_button_new_with_label(cstr(text).as_ptr()) };
+        Box::new(Handle { base: GtkBase::new(parent, widget, Some("clicked")) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+    }
+    impl_widget_handle!(Handle, base);
+    impl CheckBoxHandle for Handle {
+        fn set_text(&self, text: &str) {
+            unsafe { ffi::gtk_button_set_label(self.base.widget, cstr(text).as_ptr()) };
+        }
+        fn text(&self) -> String {
+            from_c(unsafe { ffi::gtk_button_get_label(self.base.widget) })
+        }
+        fn set_checked(&self, checked: bool) {
+            programmatic(|| unsafe { ffi::gtk_toggle_button_set_active(self.base.widget, checked as i32) });
+        }
+        fn checked(&self) -> bool {
+            unsafe { ffi::gtk_toggle_button_get_active(self.base.widget) != 0 }
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

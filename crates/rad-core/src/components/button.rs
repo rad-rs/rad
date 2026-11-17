@@ -89,6 +89,30 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, ffi, from_c, impl_widget_handle, GtkBase, Parent};
+
+    pub(super) fn create(parent: &Parent, text: &str) -> Box<dyn ButtonHandle> {
+        let widget = unsafe { ffi::gtk_button_new_with_label(cstr(text).as_ptr()) };
+        Box::new(Handle { base: GtkBase::new(parent, widget, Some("clicked")) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+    }
+    impl_widget_handle!(Handle, base);
+    impl ButtonHandle for Handle {
+        fn set_text(&self, text: &str) {
+            unsafe { ffi::gtk_button_set_label(self.base.widget, cstr(text).as_ptr()) };
+        }
+        fn text(&self) -> String {
+            from_c(unsafe { ffi::gtk_button_get_label(self.base.widget) })
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

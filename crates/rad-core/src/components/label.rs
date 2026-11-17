@@ -88,6 +88,38 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, event_box_around, ffi, from_c, impl_widget_handle, GtkBase, Parent};
+
+    pub(super) fn create(parent: &Parent, text: &str) -> Box<dyn LabelHandle> {
+        // A label has no GDK window of its own; an event box gives it clicks
+        // and a background colour.
+        let label = unsafe { ffi::gtk_label_new(cstr(text).as_ptr()) };
+        unsafe {
+            ffi::gtk_label_set_xalign(label, 0.0);
+            ffi::gtk_label_set_yalign(label, 0.0);
+        }
+        let base = GtkBase::new(parent, event_box_around(label), None);
+        Box::new(Handle { base, label })
+    }
+
+    struct Handle {
+        base: GtkBase,
+        label: *mut ffi::GtkWidget,
+    }
+    impl_widget_handle!(Handle, base);
+    impl LabelHandle for Handle {
+        fn set_text(&self, text: &str) {
+            unsafe { ffi::gtk_label_set_text(self.label, cstr(text).as_ptr()) };
+        }
+        fn text(&self) -> String {
+            from_c(unsafe { ffi::gtk_label_get_text(self.label) })
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

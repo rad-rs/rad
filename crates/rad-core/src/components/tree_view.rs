@@ -146,6 +146,66 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, ffi, impl_widget_handle, scrolled_around, GtkBase, Parent};
+    use std::cell::RefCell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn TreeViewHandle> {
+        unsafe {
+            // One string column, shown without a header.
+            let types = [ffi::G_TYPE_STRING];
+            let store = ffi::gtk_tree_store_newv(1, types.as_ptr());
+            let view = ffi::gtk_tree_view_new_with_model(store);
+            ffi::gtk_tree_view_set_headers_visible(view, 0);
+            let renderer = ffi::gtk_cell_renderer_text_new();
+            let column = ffi::gtk_tree_view_column_new_with_attributes(
+                c"".as_ptr(),
+                renderer,
+                c"text".as_ptr(),
+                0 as std::ffi::c_int,
+                std::ptr::null::<std::ffi::c_void>(),
+            );
+            ffi::gtk_tree_view_append_column(view, column);
+            let base = GtkBase::new(parent, scrolled_around(view), None);
+            Box::new(Handle { base, view, store, items: RefCell::new(Vec::new()) })
+        }
+    }
+
+    struct Handle {
+        base: GtkBase,
+        view: *mut ffi::GtkWidget,
+        store: *mut std::ffi::c_void,
+        items: RefCell<Vec<TreeItem>>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl TreeViewHandle for Handle {
+        fn set_items(&self, items: &[TreeItem]) {
+            *self.items.borrow_mut() = items.to_vec();
+            unsafe {
+                ffi::gtk_tree_store_clear(self.store);
+                // The parent of an item is the last one seen one level shallower:
+                // `path[d]` is the most recent item at depth `d`.
+                let mut path: Vec<ffi::GtkTreeIter> = Vec::new();
+                for (depth, text) in items {
+                    let depth = (*depth as usize).min(path.len());
+                    path.truncate(depth);
+                    let mut iter = std::mem::zeroed::<ffi::GtkTreeIter>();
+                    let parent = if depth == 0 { std::ptr::null() } else { &path[depth - 1] as *const _ };
+                    ffi::gtk_tree_store_append(self.store, &mut iter, parent);
+                    ffi::gtk_tree_store_set(self.store, &mut iter, 0 as std::ffi::c_int, cstr(text).as_ptr(), -1 as std::ffi::c_int);
+                    path.push(iter);
+                }
+                ffi::gtk_tree_view_expand_all(self.view);
+            }
+        }
+        fn items(&self) -> Vec<TreeItem> {
+            self.items.borrow().clone()
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

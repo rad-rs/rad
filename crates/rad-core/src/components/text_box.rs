@@ -88,6 +88,33 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, ffi, from_c, impl_widget_handle, GtkBase, Parent};
+
+    pub(super) fn create(parent: &Parent, text: &str) -> Box<dyn TextBoxHandle> {
+        let widget = unsafe { ffi::gtk_entry_new() };
+        unsafe { ffi::gtk_entry_set_text(widget, cstr(text).as_ptr()) };
+        // An entry consumes mouse presses itself, so there is no plain click to
+        // hook; "activate" (Enter) is the closest thing it raises.
+        Box::new(Handle { base: GtkBase::new(parent, widget, Some("activate")) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+    }
+    impl_widget_handle!(Handle, base);
+    impl TextBoxHandle for Handle {
+        fn set_text(&self, text: &str) {
+            unsafe { ffi::gtk_entry_set_text(self.base.widget, cstr(text).as_ptr()) };
+        }
+        fn text(&self) -> String {
+            from_c(unsafe { ffi::gtk_entry_get_text(self.base.widget) })
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

@@ -119,6 +119,37 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{cstr, event_box_around, ffi, impl_widget_handle, GtkBase, Parent};
+    use std::cell::RefCell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn PictureBoxHandle> {
+        // The event box takes clicks and the back colour; the image sits inside.
+        let image = unsafe { ffi::gtk_image_new() };
+        let base = GtkBase::new(parent, event_box_around(image), None);
+        Box::new(Handle { base, image, path: RefCell::new(String::new()) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+        image: *mut ffi::GtkWidget,
+        path: RefCell<String>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl PictureBoxHandle for Handle {
+        fn set_image_path(&self, path: &str) {
+            *self.path.borrow_mut() = path.to_string();
+            // gdk-pixbuf decodes whatever loaders are installed (PNG, JPEG, BMP...).
+            unsafe { ffi::gtk_image_set_from_file(self.image, cstr(path).as_ptr()) };
+        }
+        fn image_path(&self) -> String {
+            self.path.borrow().clone()
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;

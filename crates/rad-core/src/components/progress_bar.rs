@@ -95,6 +95,34 @@ mod imp {
     }
 }
 
+#[cfg(rad_gtk)]
+mod imp {
+    use super::*;
+    use crate::platform::gtk::{ffi, impl_widget_handle, GtkBase, Parent};
+    use std::cell::Cell;
+
+    pub(super) fn create(parent: &Parent) -> Box<dyn ProgressBarHandle> {
+        let widget = unsafe { ffi::gtk_progress_bar_new() };
+        Box::new(Handle { base: GtkBase::new(parent, widget, None), value: Cell::new(0) })
+    }
+
+    struct Handle {
+        base: GtkBase,
+        value: Cell<u32>,
+    }
+    impl_widget_handle!(Handle, base);
+    impl ProgressBarHandle for Handle {
+        fn set_value(&self, value: u32) {
+            let value = value.min(100);
+            self.value.set(value);
+            unsafe { ffi::gtk_progress_bar_set_fraction(self.base.widget, value as f64 / 100.0) };
+        }
+        fn value(&self) -> u32 {
+            self.value.get()
+        }
+    }
+}
+
 #[cfg(rad_web)]
 mod imp {
     use super::*;
