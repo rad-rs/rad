@@ -1,5 +1,5 @@
-//! Minimal designer: drag a palette tile (Button, Label, CheckBox,
-//! TextBox, or RadioButton) onto a resizable preview `Window`; placed
+//! Minimal designer: drag a toolbox tile (one per component in `rad-core`)
+//! onto a resizable preview `Window`; placed
 //! controls are repositionable by pointer-drag (built into
 //! `rad-backend-web`). `form1.designer.rs` regenerates automatically on
 //! every form change (polled, not event-driven — see `start()`), and
@@ -9,10 +9,10 @@
 //! open as real tabs with a Monaco editor, same as the built-in
 //! "Designer" tab holding the toolbox/stage/properties/file list.
 //!
-//! Adding a further control kind to the palette means: one more
-//! `PlacedKind` variant, one line in each of its match arms, and a
-//! palette tile in `index.html` — the pos/size/text plumbing underneath
-//! is already shared via `rad-core`'s `WidgetHandle`.
+//! Nothing here names a control: the toolbox, a placed control's properties
+//! and the generated `form1.designer.rs` all come from `rad-core`'s component
+//! registry (`COMPONENTS`), so adding a control means dropping one file into
+//! `rad-core/src/components/`.
 //!
 //! The live form sits in an `<iframe>` (`frame.html`) in the designer
 //! tab's stage column, and this module does its work from the copy
@@ -28,8 +28,8 @@ mod native_build;
 
 use rad_backend_web::WebWindow;
 use rad_core::{
-    Button, CheckBox, ComboBox, Label, ListBox, PictureBox, ProgressBar, RadioButton, TextBox,
-    Timer, TrackBar, TreeView, WindowHandle,
+    parse_lines, parse_tree_text, ComponentInfo, CtorArg, Designable, PropType, PropValue, WidgetHandle,
+    WindowHandle, COMPONENTS,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -100,406 +100,169 @@ mod native_build_pipeline {
     }
 }
 
-/// One of the control types the palette can place. Each variant is just a
-/// `rad-core` wrapper type — this enum exists only so the designer can
-/// hold "whatever got placed" in one `Vec`, since Rust has no common
-/// concrete type for "any widget".
-enum PlacedKind {
-    Button(Button),
-    Label(Label),
-    CheckBox(CheckBox),
-    TextBox(TextBox),
-    RadioButton(RadioButton),
-    ProgressBar(ProgressBar),
-    PictureBox(PictureBox),
-    TreeView(TreeView),
-    TrackBar(TrackBar),
-    ComboBox(ComboBox),
-    ListBox(ListBox),
-    /// Non-visual: has no place on the form, so it lives in the component
-    /// tray below it and has no position, size or text.
-    Timer(Timer),
+/// A placed component: its registry entry plus the live instance, behind the
+/// uniform `Designable` view. Each accessor reads or writes one named property
+/// and answers `None` / does nothing for a component that does not have it, which
+/// is also what shows or hides the matching row in the properties panel.
+struct PlacedKind {
+    info: &'static ComponentInfo,
+    comp: Box<dyn Designable>,
 }
 
 impl PlacedKind {
     fn new(kind: &str, host: &WebWindow, text: &str) -> Option<Self> {
-        Some(match kind {
-            "Button" => Self::Button(Button::new(host, text)),
-            "Label" => Self::Label(Label::new(host, text)),
-            "CheckBox" => Self::CheckBox(CheckBox::new(host, text)),
-            "TextBox" => Self::TextBox(TextBox::new(host, text)),
-            // Grouping isn't exposed in the designer yet, so every radio
-            // placed this way shares one group.
-            "RadioButton" => Self::RadioButton(RadioButton::new(host, "group1", text)),
-            "ProgressBar" => Self::ProgressBar(ProgressBar::new(host)),
-            "PictureBox" => Self::PictureBox(PictureBox::new(host)),
-            "TreeView" => Self::TreeView(TreeView::new(host)),
-            "TrackBar" => Self::TrackBar(TrackBar::new(host)),
-            "ComboBox" => Self::ComboBox(ComboBox::new(host)),
-            "ListBox" => Self::ListBox(ListBox::new(host)),
-            "Timer" => Self::Timer(Timer::new(host)),
-            _ => return None,
-        })
+        let info = COMPONENTS.iter().copied().find(|info| info.name == kind)?;
+        Some(Self { info, comp: (info.create)(host, text) })
     }
 
+    /// The type's name, as written in generated code and the toolbox.
     fn kind_name(&self) -> &'static str {
-        match self {
-            Self::Button(_) => "Button",
-            Self::Label(_) => "Label",
-            Self::CheckBox(_) => "CheckBox",
-            Self::TextBox(_) => "TextBox",
-            Self::RadioButton(_) => "RadioButton",
-            Self::ProgressBar(_) => "ProgressBar",
-            Self::PictureBox(_) => "PictureBox",
-            Self::TreeView(_) => "TreeView",
-            Self::TrackBar(_) => "TrackBar",
-            Self::ComboBox(_) => "ComboBox",
-            Self::ListBox(_) => "ListBox",
-            Self::Timer(_) => "Timer",
-        }
+        self.info.name
+    }
+
+    /// The event double-clicking the component stubs out: "click" for most
+    /// controls, "tick" for a `Timer`, "change" for a list. Nothing else about
+    /// the double-click flow depends on which event it is.
+    fn default_event(&self) -> &'static str {
+        self.info.default_event()
+    }
+
+    fn widget(&self) -> Option<&dyn WidgetHandle> {
+        self.comp.widget()
     }
 
     fn pos(&self) -> (i32, i32) {
-        match self {
-            Self::Button(c) => c.pos(),
-            Self::Label(c) => c.pos(),
-            Self::CheckBox(c) => c.pos(),
-            Self::TextBox(c) => c.pos(),
-            Self::RadioButton(c) => c.pos(),
-            Self::ProgressBar(c) => c.pos(),
-            Self::PictureBox(c) => c.pos(),
-            Self::TreeView(c) => c.pos(),
-            Self::TrackBar(c) => c.pos(),
-            Self::ComboBox(c) => c.pos(),
-            Self::ListBox(c) => c.pos(),
-            Self::Timer(_) => (0, 0),
-        }
+        self.widget().map_or((0, 0), |w| w.pos())
     }
 
     fn set_pos(&mut self, x: i32, y: i32) {
-        match self {
-            Self::Button(c) => c.set_pos(x, y),
-            Self::Label(c) => c.set_pos(x, y),
-            Self::CheckBox(c) => c.set_pos(x, y),
-            Self::TextBox(c) => c.set_pos(x, y),
-            Self::RadioButton(c) => c.set_pos(x, y),
-            Self::ProgressBar(c) => c.set_pos(x, y),
-            Self::PictureBox(c) => c.set_pos(x, y),
-            Self::TreeView(c) => c.set_pos(x, y),
-            Self::TrackBar(c) => c.set_pos(x, y),
-            Self::ComboBox(c) => c.set_pos(x, y),
-            Self::ListBox(c) => c.set_pos(x, y),
-            Self::Timer(_) => {}
+        if let Some(w) = self.widget() {
+            w.set_pos(x, y);
         }
     }
 
     fn width(&self) -> u32 {
-        match self {
-            Self::Button(c) => c.width(),
-            Self::Label(c) => c.width(),
-            Self::CheckBox(c) => c.width(),
-            Self::TextBox(c) => c.width(),
-            Self::RadioButton(c) => c.width(),
-            Self::ProgressBar(c) => c.width(),
-            Self::PictureBox(c) => c.width(),
-            Self::TreeView(c) => c.width(),
-            Self::TrackBar(c) => c.width(),
-            Self::ComboBox(c) => c.width(),
-            Self::ListBox(c) => c.width(),
-            Self::Timer(_) => 0,
-        }
+        self.widget().map_or(0, |w| w.width())
     }
 
     fn set_width(&mut self, width: u32) {
-        match self {
-            Self::Button(c) => c.set_width(width),
-            Self::Label(c) => c.set_width(width),
-            Self::CheckBox(c) => c.set_width(width),
-            Self::TextBox(c) => c.set_width(width),
-            Self::RadioButton(c) => c.set_width(width),
-            Self::ProgressBar(c) => c.set_width(width),
-            Self::PictureBox(c) => c.set_width(width),
-            Self::TreeView(c) => c.set_width(width),
-            Self::TrackBar(c) => c.set_width(width),
-            Self::ComboBox(c) => c.set_width(width),
-            Self::ListBox(c) => c.set_width(width),
-            Self::Timer(_) => {}
+        if let Some(w) = self.widget() {
+            w.set_width(width);
         }
     }
 
     fn height(&self) -> u32 {
-        match self {
-            Self::Button(c) => c.height(),
-            Self::Label(c) => c.height(),
-            Self::CheckBox(c) => c.height(),
-            Self::TextBox(c) => c.height(),
-            Self::RadioButton(c) => c.height(),
-            Self::ProgressBar(c) => c.height(),
-            Self::PictureBox(c) => c.height(),
-            Self::TreeView(c) => c.height(),
-            Self::TrackBar(c) => c.height(),
-            Self::ComboBox(c) => c.height(),
-            Self::ListBox(c) => c.height(),
-            Self::Timer(_) => 0,
-        }
+        self.widget().map_or(0, |w| w.height())
     }
 
     fn set_height(&mut self, height: u32) {
-        match self {
-            Self::Button(c) => c.set_height(height),
-            Self::Label(c) => c.set_height(height),
-            Self::CheckBox(c) => c.set_height(height),
-            Self::TextBox(c) => c.set_height(height),
-            Self::RadioButton(c) => c.set_height(height),
-            Self::ProgressBar(c) => c.set_height(height),
-            Self::PictureBox(c) => c.set_height(height),
-            Self::TreeView(c) => c.set_height(height),
-            Self::TrackBar(c) => c.set_height(height),
-            Self::ComboBox(c) => c.set_height(height),
-            Self::ListBox(c) => c.set_height(height),
-            Self::Timer(_) => {}
+        if let Some(w) = self.widget() {
+            w.set_height(height);
         }
+    }
+
+    fn get_int(&self, property: &str) -> Option<i32> {
+        self.comp.get(property)?.into_int()
+    }
+
+    fn get_text(&self, property: &str) -> Option<String> {
+        self.comp.get(property)?.into_text()
     }
 
     /// `None` for a kind with no plain text property at all (shows and
-    /// disables the panel's Text field) — `ProgressBar`/`PictureBox`/
-    /// `TreeView` have their own properties (Value/Image path/Items)
-    /// instead.
+    /// disables the panel's Text field).
     fn text(&self) -> Option<String> {
-        match self {
-            Self::Button(c) => Some(c.text()),
-            Self::Label(c) => Some(c.text()),
-            Self::CheckBox(c) => Some(c.text()),
-            Self::TextBox(c) => Some(c.text()),
-            Self::RadioButton(c) => Some(c.text()),
-            Self::ProgressBar(_)
-            | Self::PictureBox(_)
-            | Self::TreeView(_)
-            | Self::TrackBar(_)
-            | Self::ComboBox(_)
-            | Self::ListBox(_)
-            | Self::Timer(_) => None,
-        }
+        self.get_text("text")
     }
 
     fn set_text(&mut self, text: &str) {
-        match self {
-            Self::Button(c) => c.set_text(text),
-            Self::Label(c) => c.set_text(text),
-            Self::CheckBox(c) => c.set_text(text),
-            Self::TextBox(c) => c.set_text(text),
-            Self::RadioButton(c) => c.set_text(text),
-            Self::ProgressBar(_)
-            | Self::PictureBox(_)
-            | Self::TreeView(_)
-            | Self::TrackBar(_)
-            | Self::ComboBox(_)
-            | Self::ListBox(_)
-            | Self::Timer(_) => {}
-        }
+        self.comp.set("text", PropValue::Text(text.to_string()));
     }
 
     /// `None` for a kind that has no checked state at all (shows and
-    /// disables the panel's Checked field); `Some` for one that does.
+    /// disables the panel's Checked field); `Some` for one that does. A
+    /// timer's Enabled is shown through the same checkbox row.
     fn checked(&self) -> Option<bool> {
-        match self {
-            Self::CheckBox(c) => Some(c.checked()),
-            Self::RadioButton(c) => Some(c.checked()),
-            // A timer's Enabled is shown through the same checkbox row.
-            Self::Timer(c) => Some(c.enabled()),
-            _ => None,
-        }
+        self.comp.get("checked").or_else(|| self.comp.get("enabled"))?.into_bool()
     }
 
     fn set_checked(&mut self, checked: bool) {
-        match self {
-            Self::CheckBox(c) => c.set_checked(checked),
-            Self::RadioButton(c) => c.set_checked(checked),
-            Self::Timer(c) => c.set_enabled(checked),
-            _ => {}
-        }
+        let property = if self.comp.get("checked").is_some() { "checked" } else { "enabled" };
+        self.comp.set(property, PropValue::Bool(checked));
     }
 
     /// `Some` for `ProgressBar` and `TrackBar` — shows/hides the panel's
     /// Value row.
     fn value(&self) -> Option<i32> {
-        match self {
-            Self::ProgressBar(c) => Some(c.value() as i32),
-            Self::TrackBar(c) => Some(c.value()),
-            _ => None,
-        }
+        self.get_int("value")
     }
 
     fn set_value(&mut self, value: i32) {
-        match self {
-            Self::ProgressBar(c) => c.set_value(value.clamp(0, 100) as u32),
-            // The backend clamps to the trackbar's own range.
-            Self::TrackBar(c) => c.set_value(value),
-            _ => {}
-        }
+        self.comp.set("value", PropValue::Int(value));
     }
 
     /// `Some((minimum, maximum))` only for `TrackBar`.
     fn range(&self) -> Option<(i32, i32)> {
-        match self {
-            Self::TrackBar(c) => Some((c.minimum(), c.maximum())),
-            _ => None,
-        }
+        Some((self.get_int("minimum")?, self.get_int("maximum")?))
     }
 
     fn set_range(&mut self, minimum: i32, maximum: i32) {
-        if let Self::TrackBar(c) = self {
-            // Widen before narrowing so the range is never momentarily empty.
-            if maximum >= c.maximum() {
-                c.set_maximum(maximum);
-                c.set_minimum(minimum);
-            } else {
-                c.set_minimum(minimum);
-                c.set_maximum(maximum);
-            }
+        let Some((_, current_max)) = self.range() else { return };
+        // Widen before narrowing so the range is never momentarily empty.
+        if maximum >= current_max {
+            self.comp.set("maximum", PropValue::Int(maximum));
+            self.comp.set("minimum", PropValue::Int(minimum));
+        } else {
+            self.comp.set("minimum", PropValue::Int(minimum));
+            self.comp.set("maximum", PropValue::Int(maximum));
         }
     }
 
     /// `Some` for list-like kinds: the selected item's index, `-1` for none.
     fn selected_index(&self) -> Option<i32> {
-        match self {
-            Self::ComboBox(c) => Some(c.selected_index().map_or(-1, |i| i as i32)),
-            Self::ListBox(c) => Some(c.selected_index().map_or(-1, |i| i as i32)),
-            _ => None,
-        }
+        self.get_int("selected_index")
     }
 
     fn set_selected_index(&mut self, index: i32) {
-        let index = usize::try_from(index).ok();
-        match self {
-            Self::ComboBox(c) => c.set_selected_index(index),
-            Self::ListBox(c) => c.set_selected_index(index),
-            _ => {}
-        }
+        self.comp.set("selected_index", PropValue::Int(index));
     }
 
-    /// `Some` only for `PictureBox` — shows/hides the panel's Image
-    /// path row.
+    /// `Some` only for `PictureBox` — shows/hides the panel's Image path row.
     fn image_path(&self) -> Option<String> {
-        match self {
-            Self::PictureBox(c) => Some(c.image_path()),
-            _ => None,
-        }
+        self.get_text("image_path")
     }
 
     fn set_image_path(&mut self, path: &str) {
-        if let Self::PictureBox(c) = self {
-            c.set_image_path(path);
-        }
+        self.comp.set("image_path", PropValue::Text(path.to_string()));
     }
 
-    /// `Some` only for `TreeView` — shows/hides the panel's Items row.
-    /// Each item's depth is encoded as its line's leading-space count
-    /// divided by two, matching `format_items_text`'s inverse.
+    /// `Some` for the list kinds and `TreeView` — shows/hides the panel's Items
+    /// row. A tree's depth is its line's leading-space count divided by two.
     fn items_text(&self) -> Option<String> {
-        match self {
-            Self::TreeView(c) => Some(format_items_text(&c.items())),
-            Self::ComboBox(c) => Some(c.items().join("\n")),
-            Self::ListBox(c) => Some(c.items().join("\n")),
-            _ => None,
-        }
+        self.get_text("items")
     }
 
     fn set_items_text(&mut self, text: &str) {
-        match self {
-            Self::TreeView(c) => c.set_items(&parse_items_text(text)),
-            // One item per line, surrounding spaces ignored. Every property
-            // edit re-applies all fields, and setting the items clears the
-            // selection, so leave an unchanged list alone.
-            Self::ComboBox(c) => {
-                let items = parse_list_items(text);
-                if items != c.items() {
-                    c.set_items(&items);
-                }
-            }
-            Self::ListBox(c) => {
-                let items = parse_list_items(text);
-                if items != c.items() {
-                    c.set_items(&items);
-                }
-            }
-            _ => {}
-        }
+        self.comp.set("items", PropValue::Text(text.to_string()));
     }
 
     /// `Some` only for `Timer` — shows/hides the panel's Interval row.
     fn interval(&self) -> Option<u32> {
-        match self {
-            Self::Timer(c) => Some(c.interval()),
-            _ => None,
-        }
+        self.get_int("interval").map(|ms| ms.max(0) as u32)
     }
 
     fn set_interval(&mut self, interval_ms: u32) {
-        if let Self::Timer(c) = self {
-            c.set_interval(interval_ms);
-        }
+        self.comp.set("interval", PropValue::Int(interval_ms.min(i32::MAX as u32) as i32));
     }
 
     /// A non-visual component: lives in the tray, not on the form, and has
     /// no position or size to edit.
     fn is_component(&self) -> bool {
-        matches!(self, Self::Timer(_))
+        !self.info.visual
     }
 
     fn default_size(kind: &str) -> (u32, u32) {
-        match kind {
-            "Button" => (75, 23),
-            "Label" => (60, 16),
-            "CheckBox" => (90, 17),
-            "TextBox" => (100, 20),
-            "RadioButton" => (90, 17),
-            "ProgressBar" => (150, 23),
-            "PictureBox" => (100, 50),
-            "TreeView" => (121, 97),
-            "TrackBar" => (150, 30),
-            "ComboBox" => (121, 21),
-            "ListBox" => (120, 95),
-            // Not drawn on the form; the size is never read.
-            "Timer" => (0, 0),
-            _ => (75, 23),
-        }
-    }
-}
-
-/// Two spaces of indent per depth level — simple to type and to read
-/// back unambiguously, unlike tabs (which the `<textarea>` may or may
-/// not insert literally depending on the browser).
-fn format_items_text(items: &[rad_core::TreeItem]) -> String {
-    items
-        .iter()
-        .map(|(depth, text)| format!("{}{}", "  ".repeat(*depth as usize), text))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn parse_list_items(text: &str) -> Vec<String> {
-    text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect()
-}
-
-fn parse_items_text(text: &str) -> Vec<rad_core::TreeItem> {
-    text.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let leading_spaces = line.len() - line.trim_start_matches(' ').len();
-            ((leading_spaces / 2) as u32, line.trim().to_string())
-        })
-        .collect()
-}
-
-/// The event double-clicking a kind in the designer stubs out: "click" for
-/// controls, "tick" for a `Timer`, whose job is firing on its own schedule.
-/// Nothing else about the double-click flow depends on which event it is.
-fn default_event_name(kind: &str) -> &'static str {
-    match kind {
-        "Timer" => "tick",
-        "TrackBar" | "ComboBox" | "ListBox" => "change",
-        _ => "click",
+        COMPONENTS.iter().find(|info| info.name == kind).map_or((75, 23), |info| info.default_size)
     }
 }
 
@@ -1368,7 +1131,7 @@ pub fn start() {
                 return;
             };
             e.stop_propagation();
-            let event = default_event_name(control.control.kind_name());
+            let event = control.control.default_event();
             open_handler(&refs, HandlerTarget::Control(control.name.clone()), event, &control.name);
         }) as Box<dyn FnMut(MouseEvent)>)
     };
@@ -1421,7 +1184,7 @@ pub fn start() {
                 return;
             };
             e.stop_propagation();
-            let event = default_event_name(control.control.kind_name());
+            let event = control.control.default_event();
             open_handler(&refs, HandlerTarget::Control(control.name.clone()), event, &control.name);
         }) as Box<dyn FnMut(MouseEvent)>)
     };
@@ -1530,11 +1293,14 @@ pub fn start() {
                 // User code only runs in a built app, so the preview timer
                 // has no handler of its own; blink the chip's dot on every
                 // tick so a running timer is visibly ticking in the designer.
-                if let PlacedKind::Timer(timer) = &control {
+                {
                     let chip = chip.clone();
-                    timer.set_on_tick(Box::new(move || {
-                        chip.class_list().toggle("blink").ok();
-                    }));
+                    control.comp.set_event(
+                        control.default_event(),
+                        Box::new(move || {
+                            chip.class_list().toggle("blink").ok();
+                        }),
+                    );
                 }
                 let placed = PlacedControl { name, control, element: chip };
                 render_chip(&placed);
@@ -1568,6 +1334,7 @@ pub fn start() {
     // iframe; same-origin HTML5 drag-and-drop crosses that boundary
     // natively, and `grab_offset` is shared since it's all one module.
     let palette: Element = chrome_element(&chrome, "palette");
+    populate_palette(&chrome, &palette);
     let on_dragstart = {
         let grab_offset = grab_offset.clone();
         Closure::wrap(Box::new(move |e: DragEvent| {
@@ -2115,7 +1882,9 @@ fn open_handler(refs: &Rc<ChromeRefs>, target: HandlerTarget, event: &'static st
 }
 
 /// Renders the placed controls as a `form1.designer.rs` body — the same
-/// shape `rad-demo`'s hand-split file already uses.
+/// shape `rad-demo`'s hand-split file already uses. Driven entirely by each
+/// component's registry entry: its constructor arguments, then its properties in
+/// declared order, each set through its `set_<name>` method.
 fn generate_designer_source(controls: &[PlacedControl]) -> String {
     let mut kinds_used: Vec<&'static str> = controls.iter().map(|c| c.control.kind_name()).collect();
     kinds_used.sort_unstable();
@@ -2136,67 +1905,65 @@ fn generate_designer_source(controls: &[PlacedControl]) -> String {
     src.push_str("}\n\n");
     src.push_str("pub fn build(window: &Window) -> Form1Controls {\n");
     for c in controls {
-        let (x, y) = c.control.pos();
-        let width = c.control.width();
-        let height = c.control.height();
-        let kind = c.control.kind_name();
+        let info = c.control.info;
+        let kind = info.name;
         let name = &c.name;
-        let ctor = match (&c.control, c.control.text()) {
-            (PlacedKind::RadioButton(_), Some(text)) => {
-                format!("{kind}::new(window, \"group1\", \"{text}\")")
+        let mut args = vec!["window".to_string()];
+        let mut text_in_ctor = false;
+        for arg in info.ctor {
+            match arg {
+                CtorArg::Text => {
+                    text_in_ctor = true;
+                    args.push(format!("\"{}\"", c.control.text().unwrap_or_default()));
+                }
+                CtorArg::Lit(literal) => args.push((*literal).to_string()),
             }
-            (_, Some(text)) => format!("{kind}::new(window, \"{text}\")"),
-            // `ProgressBar`/`PictureBox`/`TreeView` take no text.
-            (_, None) => format!("{kind}::new(window)"),
-        };
-        src.push_str(&format!("    let {name} = {ctor};\n"));
-        if let Some(interval) = c.control.interval() {
-            // A Timer is a non-visual component: no position or size, just
-            // its schedule.
-            src.push_str(&format!("    {name}.set_interval({interval});\n"));
         }
-        if !c.control.is_component() {
+        src.push_str(&format!("    let {name} = {kind}::new({});\n", args.join(", ")));
+        if info.visual {
+            let (x, y) = c.control.pos();
+            let width = c.control.width();
+            let height = c.control.height();
             src.push_str(&format!(
                 "    {name}.set_pos({x}, {y});\n\
                  \x20   {name}.set_width({width});\n\
                  \x20   {name}.set_height({height});\n",
             ));
         }
-        if let Some(checked) = c.control.checked() {
-            if c.control.is_component() {
-                src.push_str(&format!("    {name}.set_enabled({checked});\n"));
-            } else {
-                src.push_str(&format!("    {name}.set_checked({checked});\n"));
+        for property in info.properties {
+            if property.name == "text" && text_in_ctor {
+                continue;
             }
-        }
-        if let Some((minimum, maximum)) = c.control.range() {
-            // Range before value: the value is clamped to it.
-            src.push_str(&format!("    {name}.set_minimum({minimum});\n    {name}.set_maximum({maximum});\n"));
-        }
-        if let Some(value) = c.control.value() {
-            src.push_str(&format!("    {name}.set_value({value});\n"));
-        }
-        if let Some(path) = c.control.image_path().filter(|p| !p.is_empty()) {
-            src.push_str(&format!("    {name}.set_image_path(\"{path}\");\n"));
-        }
-        if let Some(items) = c.control.items_text().filter(|t| !t.trim().is_empty()) {
-            let items_literal = if matches!(c.control, PlacedKind::TreeView(_)) {
-                parse_items_text(&items)
-                    .iter()
-                    .map(|(depth, text)| format!("({depth}, \"{text}\".to_string())"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            } else {
-                parse_list_items(&items)
-                    .iter()
-                    .map(|text| format!("\"{text}\".to_string()"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            src.push_str(&format!("    {name}.set_items(&[{items_literal}]);\n"));
-        }
-        if let Some(index) = c.control.selected_index().filter(|i| *i >= 0) {
-            src.push_str(&format!("    {name}.set_selected_index(Some({index}));\n"));
+            let Some(value) = c.control.comp.get(property.name) else { continue };
+            let setter = format!("    {name}.set_{}", property.name);
+            match (property.ty, value) {
+                (PropType::Bool, PropValue::Bool(v)) => src.push_str(&format!("{setter}({v});\n")),
+                (PropType::Int, PropValue::Int(v)) => src.push_str(&format!("{setter}({v});\n")),
+                (PropType::Text, PropValue::Text(v)) => src.push_str(&format!("{setter}(\"{v}\");\n")),
+                (PropType::Path, PropValue::Text(v)) if !v.is_empty() => {
+                    src.push_str(&format!("{setter}(\"{v}\");\n"));
+                }
+                (PropType::Lines, PropValue::Text(v)) if !v.trim().is_empty() => {
+                    let items = parse_lines(&v)
+                        .iter()
+                        .map(|text| format!("\"{text}\".to_string()"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    src.push_str(&format!("{setter}(&[{items}]);\n"));
+                }
+                (PropType::Tree, PropValue::Text(v)) if !v.trim().is_empty() => {
+                    let items = parse_tree_text(&v)
+                        .iter()
+                        .map(|(depth, text)| format!("({depth}, \"{text}\".to_string())"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    src.push_str(&format!("{setter}(&[{items}]);\n"));
+                }
+                (PropType::Index, PropValue::Int(v)) if v >= 0 => {
+                    src.push_str(&format!("{setter}(Some({v}));\n"));
+                }
+                _ => {}
+            }
         }
         src.push('\n');
     }
@@ -2206,4 +1973,38 @@ fn generate_designer_source(controls: &[PlacedControl]) -> String {
     }
     src.push_str("    }\n}\n");
     src
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Fills the toolbox in the parent page from the component registry: tiles
+/// sorted by each component's `order`, under a header whenever the category
+/// changes. Nothing about a particular component is named here.
+fn populate_palette(chrome: &Document, palette: &Element) {
+    let mut infos: Vec<&ComponentInfo> = COMPONENTS.to_vec();
+    infos.sort_by_key(|info| (info.order, info.name));
+    let mut category = "";
+    for info in infos {
+        if info.category != category {
+            category = info.category;
+            if let Ok(header) = chrome.create_element("div") {
+                header.set_class_name("palette-group-header");
+                header.set_text_content(Some(category));
+                palette.append_child(&header).ok();
+            }
+        }
+        if let Ok(tile) = chrome.create_element("div") {
+            tile.set_class_name("palette-item");
+            tile.set_attribute("data-kind", info.name).ok();
+            tile.set_attribute("draggable", "true").ok();
+            tile.set_inner_html(&format!(
+                "<span class=\"palette-icon\">{}</span>{}",
+                escape_html(info.icon),
+                escape_html(info.name)
+            ));
+            palette.append_child(&tile).ok();
+        }
+    }
 }

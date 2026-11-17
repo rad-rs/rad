@@ -185,6 +185,8 @@ export async function buildNativeApp(files, triple, onProgress) {
     "--crate-name", "app",
     "--crate-type", "bin",
     "--edition", "2021",
+    // Selects rad-core's platform: components are compiled for `rad_win32`.
+    "--cfg", "rad_win32",
     "--target", triple,
     "--sysroot", "/sysroot",
     "-C", "linker-flavor=ld.lld",

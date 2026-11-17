@@ -150,6 +150,8 @@ export async function buildApp(files, onProgress) {
     "--target", "wasm32-unknown-unknown",
     "--crate-type", "cdylib",
     "--edition", "2024",
+    // Selects rad-core's platform: components are compiled for `rad_web_min`.
+    "--cfg", "rad_web_min",
     "-Zunstable-options",
     "-o", "/out.wasm",
   ]);

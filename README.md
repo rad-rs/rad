@@ -25,7 +25,18 @@ A rapid-application-development (RAD) framework and visual designer for Rust: dr
 
 `TrackBar`, `ComboBox` and `ListBox` raise `set_on_change`, fired when the user changes them (not when code does). A `Timer` has no place on the form: in the designer it appears as a chip in a component tray below the form, and double-clicking it stubs out its `tick` handler.
 
-All of them are implemented in every backend (Win32, web, web-min) and are available in the designer's toolbox.
+All of them are implemented for every platform (Win32, web, web-min) and are available in the designer's toolbox.
+
+### Adding a component
+
+A component is **one file** in `crates/rad-core/src/components/`; nothing else is edited. Copy a small one (`button.rs`) and change:
+
+- the model: a `<Name>Handle` trait, the `<Name>` wrapper (`new(host, ...)` calls `imp::create(&host.parent(), ...)`) and `impl_widget_common!`;
+- `pub(crate) const INFO: ComponentInfo`: toolbox name, category, icon and order, default size, constructor arguments, properties (name, type, default), events, and a declarative `Preview` (tag, attributes, CSS) that both browser platforms build their DOM from;
+- `impl Designable`: `get`/`set` by property name, which is how the designer edits it and writes `form1.designer.rs`;
+- one `mod imp` per platform, gated by `#[cfg(rad_win32)]`, `#[cfg(rad_web)]` or `#[cfg(rad_web_min)]` (a macOS one would be `rad_macos`), using the helpers in `rad-core/src/platform/`.
+
+The file name is the module name; its top-level `pub` items are re-exported from `rad_core`. `rad-core`'s `build.rs` finds the files and generates the module list and the `COMPONENTS` registry; the designer's `build.rs` does the same scan to mount them in the in-browser builds and fill the toolbox. Backends only create windows and run the message loop. The platform is chosen by `build.rs` from the target and the `web`/`web-min` features; the in-browser pipelines pass `--cfg rad_web_min` / `--cfg rad_win32` to rustc.
 
 In the designer, drag a control from the toolbox onto the form, click it to select it, double-click it for its event handler, and press **Delete** to remove the selected control or timer. `form1.designer.rs` is regenerated, so the removal is immediate there. A handler stub already written into `form1.rs` is yours and is left alone: the designer warns that `form1.rs` still refers to the removed control, and a build fails with the compile error until you delete that stub. A new control never reuses the name of one that `form1.rs` still refers to.
 
