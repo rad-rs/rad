@@ -4,9 +4,10 @@
 filehash = false
 
 [watch]
-# rad-designer depends on rad-core and rad-backend-web; without this trunk
-# only notices edits inside crates/rad-designer itself.
-watch = ["../rad-core", "../rad-backend-web"]
+# rad-designer depends on rad-core and rad-backend-web, and embeds the sources of
+# rad-backend-web-min and rad-backend-win32 (mounted into in-browser builds with
+# include_str!); without this trunk only notices edits inside crates/rad-designer.
+watch = ["../rad-core", "../rad-backend-web", "../rad-backend-web-min", "../rad-backend-win32"]
 
 [serve]
 open = false
