@@ -2,5 +2,24 @@
 name = "rad-core"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
+
+[features]
+# Browser platform for components, built on wasm-bindgen/web-sys (the designer
+# and the `rad-demo` app). Mutually exclusive with `web-min`.
+web = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+# Browser platform with no wasm-bindgen, driven by `rad-backend-web-min`'s
+# runtime.js. The in-browser pipeline enables it with `--cfg 'feature="web-min"'`.
+web-min = []
 
 [dependencies]
+wasm-bindgen = { version = "0.2.95", optional = true }
+js-sys = { version = "0.3.72", optional = true }
+
+[dependencies.web-sys]
+version = "0.3.72"
+optional = true
+features = [
+    "Document", "Element", "HtmlElement", "CssStyleDeclaration", "DomTokenList", "Window",
+    "PointerEvent", "EventTarget", "HtmlInputElement", "HtmlSelectElement", "MouseEvent",
+]

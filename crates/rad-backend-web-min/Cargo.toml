@@ -7,4 +7,4 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rad-core = { path = "../rad-core" }
+rad-core = { path = "../rad-core", features = ["web-min"] }

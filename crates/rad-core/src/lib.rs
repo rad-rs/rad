@@ -1,34 +1,24 @@
 //! Backend-agnostic widget model. A `Backend` implementation (native or
-//! preview) provides the real rendering; this crate only describes *what*
-//! a widget is and forwards property changes to it.
+//! preview) provides the window and message loop; each control is a
+//! *component*, one file in `src/components/` holding its model, its code for
+//! every platform and its designer metadata (see `component.rs`).
 
-mod button;
-mod checkbox;
-mod combo_box;
-mod label;
-mod list_box;
-mod picture_box;
-mod progress_bar;
-mod radio_button;
-mod textbox;
-mod timer;
-mod track_bar;
-mod tree_view;
+mod component;
+pub mod platform;
 mod widget;
 mod window;
 
-pub use button::{Button, ButtonHandle};
-pub use checkbox::{CheckBox, CheckBoxHandle};
-pub use combo_box::{ComboBox, ComboBoxHandle};
-pub use label::{Label, LabelHandle};
-pub use list_box::{ListBox, ListBoxHandle};
-pub use picture_box::{PictureBox, PictureBoxHandle};
-pub use progress_bar::{ProgressBar, ProgressBarHandle};
-pub use radio_button::{RadioButton, RadioButtonHandle};
-pub use textbox::{TextBox, TextBoxHandle};
-pub use timer::{Timer, TimerHandle};
-pub use track_bar::{TrackBar, TrackBarHandle};
-pub use tree_view::{TreeItem, TreeView, TreeViewHandle};
+/// Every component, one file each in `src/components/`; the module list, the
+/// re-exports and `COMPONENTS` are generated from whatever files are there.
+pub mod components {
+    include!(concat!(env!("OUT_DIR"), "/components.rs"));
+}
+
+pub use component::{
+    format_tree_text, parse_lines, parse_tree_text, ComponentInfo, CtorArg, Designable, Preview, PropInfo,
+    PropType, PropValue,
+};
+pub use components::*;
 pub use widget::{Color, WidgetHandle};
 pub use window::{Backend, Window, WindowHandle};
 
@@ -40,24 +30,10 @@ pub enum OsSkin {
     Linux,
 }
 
-/// A window/surface that can host widgets. Implemented per-backend. Each
-/// control type gets its own `create_*` method — Rust has no way to
-/// return "a widget" generically and still let callers use what's
-/// specific to it (`CheckBox::checked`, etc.), so this is the one place
-/// a new control type has to be named.
+/// A window/surface that can host controls. Implemented per-backend, and
+/// deliberately tiny: how a control is created is the component's own business
+/// (see `src/components/`), so adding a control type never touches this trait.
 pub trait Host {
-    fn create_button(&self, text: &str) -> Box<dyn ButtonHandle>;
-    fn create_label(&self, text: &str) -> Box<dyn LabelHandle>;
-    fn create_checkbox(&self, text: &str) -> Box<dyn CheckBoxHandle>;
-    fn create_textbox(&self, text: &str) -> Box<dyn TextBoxHandle>;
-    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn RadioButtonHandle>;
-    fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle>;
-    fn create_picture_box(&self) -> Box<dyn PictureBoxHandle>;
-    fn create_tree_view(&self) -> Box<dyn TreeViewHandle>;
-    /// Timers are non-visual, so they belong to a host (they need a window
-    /// to deliver ticks on) but never appear in it.
-    fn create_timer(&self) -> Box<dyn TimerHandle>;
-    fn create_track_bar(&self) -> Box<dyn TrackBarHandle>;
-    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle>;
-    fn create_list_box(&self) -> Box<dyn ListBoxHandle>;
+    /// What a component needs to create a native child on this host.
+    fn parent(&self) -> platform::Parent;
 }

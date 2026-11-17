@@ -108,6 +108,43 @@ macro_rules! impl_widget_common {
                 self.handle.back_color()
             }
         }
+
+        /// Lets generic code (the designer) treat any wrapper as a widget.
+        impl crate::WidgetHandle for $ty {
+            fn set_pos(&self, x: i32, y: i32) {
+                self.handle.set_pos(x, y);
+            }
+            fn pos(&self) -> (i32, i32) {
+                self.handle.pos()
+            }
+            fn set_width(&self, width: u32) {
+                self.handle.set_width(width);
+            }
+            fn width(&self) -> u32 {
+                self.handle.width()
+            }
+            fn set_height(&self, height: u32) {
+                self.handle.set_height(height);
+            }
+            fn height(&self) -> u32 {
+                self.handle.height()
+            }
+            fn set_on_click(&self, callback: Box<dyn FnMut()>) {
+                self.handle.set_on_click(callback);
+            }
+            fn set_fore_color(&self, color: Option<crate::Color>) {
+                self.handle.set_fore_color(color);
+            }
+            fn fore_color(&self) -> Option<crate::Color> {
+                self.handle.fore_color()
+            }
+            fn set_back_color(&self, color: Option<crate::Color>) {
+                self.handle.set_back_color(color);
+            }
+            fn back_color(&self) -> Option<crate::Color> {
+                self.handle.back_color()
+            }
+        }
     };
 }
 

@@ -1,12 +1,5 @@
-use crate::{
-    WebButtonHandle, WebCheckBoxHandle, WebLabelHandle, WebPictureBoxHandle,
-    WebProgressBarHandle, WebRadioButtonHandle, WebTextBoxHandle, WebTreeViewHandle,
-};
-use rad_core::{
-    Backend, ButtonHandle, CheckBoxHandle, ComboBoxHandle, Host, LabelHandle, ListBoxHandle,
-    PictureBoxHandle, ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle,
-    TrackBarHandle, TreeViewHandle, WindowHandle,
-};
+use rad_core::platform::web::Parent;
+use rad_core::{Backend, Host, WindowHandle};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -215,80 +208,8 @@ fn set_favicon_href(document: &Document, href: &str) {
 }
 
 impl Host for WebWindow {
-    fn create_button(&self, text: &str) -> Box<dyn ButtonHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "button");
-        el.set_text_content(Some(text));
-        Box::new(WebButtonHandle::new_draggable(el))
-    }
-
-    fn create_label(&self, text: &str) -> Box<dyn LabelHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "span");
-        el.set_text_content(Some(text));
-        Box::new(WebLabelHandle::new_draggable(el))
-    }
-
-    fn create_checkbox(&self, text: &str) -> Box<dyn CheckBoxHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        Box::new(WebCheckBoxHandle::new_draggable(&document, &self.body, text, false))
-    }
-
-    fn create_textbox(&self, text: &str) -> Box<dyn TextBoxHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        Box::new(WebTextBoxHandle::new_draggable(&document, &self.body, text))
-    }
-
-    fn create_radio_button(&self, group: &str, text: &str) -> Box<dyn RadioButtonHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        Box::new(WebRadioButtonHandle::new_draggable(
-            &document, &self.body, group, text, false,
-        ))
-    }
-
-    fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "progress");
-        el.set_attribute("max", "100").ok();
-        el.set_attribute("value", "0").ok();
-        Box::new(WebProgressBarHandle::new_draggable(el))
-    }
-
-    fn create_picture_box(&self) -> Box<dyn PictureBoxHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "img");
-        el.style().set_property("object-fit", "contain").ok();
-        Box::new(WebPictureBoxHandle::new_draggable(el))
-    }
-
-    fn create_tree_view(&self) -> Box<dyn TreeViewHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "div");
-        el.style().set_property("overflow", "auto").ok();
-        el.style().set_property("border", "1px solid #adadad").ok();
-        el.style().set_property("background", "#fff").ok();
-        Box::new(WebTreeViewHandle::new_draggable(el))
-    }
-
-    fn create_timer(&self) -> Box<dyn TimerHandle> {
-        Box::new(crate::WebTimerHandle::new())
-    }
-
-    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::new_track_bar_element(&document, &self.body);
-        Box::new(crate::WebTrackBarHandle::new_draggable(el))
-    }
-
-    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::create_element(&document, &self.body, "select");
-        Box::new(crate::WebSelectHandle::new_draggable(el))
-    }
-
-    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
-        let document = self.body.owner_document().expect("body has a document");
-        let el = crate::new_list_box_element(&document, &self.body);
-        Box::new(crate::WebSelectHandle::new_draggable(el))
+    fn parent(&self) -> Parent {
+        // Controls on a window are draggable: this is the design-time surface.
+        Parent { document: self.document.clone(), container: self.body.clone(), draggable: true }
     }
 }

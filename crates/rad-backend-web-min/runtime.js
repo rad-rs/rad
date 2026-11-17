@@ -8,20 +8,37 @@
 // the same table (a window is just an element whose "pos/size" is really
 // its outer size, and whose "text" is really its title bar).
 
-const KIND_BUTTON = 0;
-const KIND_LABEL = 1;
-const KIND_CHECKBOX = 2;
-const KIND_TEXTBOX = 3;
-const KIND_RADIO_BUTTON = 4;
-const KIND_PROGRESS_BAR = 5;
-const KIND_PICTURE_BOX = 6;
-const KIND_TREE_VIEW = 7;
-const KIND_TRACK_BAR = 8;
-const KIND_COMBO_BOX = 9;
-const KIND_LIST_BOX = 10;
-
 function readString(memory, ptr, len) {
   return new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+/** Parses a `Preview::to_spec` string into the fields `rad_create_element` uses. */
+function parseSpec(text) {
+  const spec = { tag: "", class: "", attrs: [], css: "", labeledInput: "" };
+  for (const line of text.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const key = line.slice(0, eq);
+    const value = line.slice(eq + 1);
+    if (key === "tag") spec.tag = value;
+    else if (key === "class") spec.class = value;
+    else if (key === "css") spec.css = value;
+    else if (key === "labeled_input") spec.labeledInput = value;
+    else if (key === "attr") {
+      const at = value.indexOf("=");
+      spec.attrs.push([value.slice(0, at), value.slice(at + 1)]);
+    }
+  }
+  return spec;
+}
+
+/** Sets an element's text the way its tag stores it: a labelled input's span, an
+ *  input's value, an image's source, otherwise its text content. */
+function setTextOf(dom, text) {
+  if (dom._radTextEl) dom._radTextEl.textContent = text;
+  else if (dom.tagName === "INPUT") dom.value = text;
+  else if (dom.tagName === "IMG") dom.src = text;
+  else dom.textContent = text;
 }
 
 /**
@@ -121,74 +138,36 @@ export async function runApp(wasmBytes, root) {
       return popped ? createPoppedWindow(popped, title, width, height) : createEmbeddedWindow(title, width, height);
     },
 
-    rad_create_element(parentId, kind, textPtr, textLen, groupPtr, groupLen) {
+    // `spec` is the component's declarative `Preview` (see `rad-core`'s
+    // `Preview::to_spec`): `key=value` lines describing the element to build,
+    // so a new component needs nothing added here.
+    rad_create_element(parentId, specPtr, specLen, textPtr, textLen, groupPtr, groupLen) {
+      const spec = parseSpec(readString(memory, specPtr, specLen));
       const text = readString(memory, textPtr, textLen);
       const group = groupLen > 0 ? readString(memory, groupPtr, groupLen) : "";
       const parent = elements[parentId].body;
 
-      let dom;
-      switch (kind) {
-        case KIND_BUTTON:
-          dom = document.createElement("button");
-          dom.textContent = text;
-          break;
-        case KIND_LABEL:
-          dom = document.createElement("span");
-          dom.textContent = text;
-          break;
-        case KIND_CHECKBOX:
-        case KIND_RADIO_BUTTON: {
-          dom = document.createElement("label");
-          const input = document.createElement("input");
-          input.type = kind === KIND_CHECKBOX ? "checkbox" : "radio";
-          if (group) input.name = group;
-          dom.appendChild(input);
-          const span = document.createElement("span");
-          span.textContent = text;
-          dom.appendChild(span);
-          dom._radInput = input;
-          dom._radTextEl = span;
-          break;
-        }
-        case KIND_TEXTBOX:
-          dom = document.createElement("input");
-          dom.type = "text";
-          dom.value = text;
-          break;
-        case KIND_PROGRESS_BAR:
-          dom = document.createElement("progress");
-          dom.max = 100;
-          dom.value = 0;
-          break;
-        case KIND_PICTURE_BOX:
-          dom = document.createElement("img");
-          dom.style.objectFit = "contain";
-          if (text) dom.src = text;
-          break;
-        case KIND_TREE_VIEW:
-          dom = document.createElement("div");
-          dom.style.cssText += "overflow:auto; border:1px solid #adadad; background:#fff;";
-          break;
-        case KIND_TRACK_BAR:
-          dom = document.createElement("input");
-          dom.type = "range";
-          dom.min = 0;
-          dom.max = 100;
-          dom.value = 0;
-          break;
-        case KIND_COMBO_BOX:
-          dom = document.createElement("select");
-          break;
-        case KIND_LIST_BOX:
-          dom = document.createElement("select");
-          dom.size = 5; // size > 1 makes a <select> a scrolling list
-          break;
-        default:
-          dom = document.createElement("div");
+      const dom = document.createElement(spec.tag || "div");
+      if (spec.class) dom.className = spec.class;
+      for (const [name, value] of spec.attrs) dom.setAttribute(name, value);
+      if (spec.css) dom.style.cssText += spec.css;
+      if (spec.labeledInput) {
+        // The native HTML pattern: <label><input><span>text</span></label>.
+        const input = document.createElement("input");
+        input.type = spec.labeledInput;
+        if (group) input.name = group;
+        dom.appendChild(input);
+        const span = document.createElement("span");
+        span.textContent = text;
+        dom.appendChild(span);
+        dom._radInput = input;
+        dom._radTextEl = span;
+      } else if (text) {
+        setTextOf(dom, text);
       }
       dom.style.position = "absolute";
       parent.appendChild(dom);
-      return newElement(kind, dom);
+      return newElement("element", dom);
     },
 
     rad_set_pos(id, x, y) {
@@ -225,14 +204,8 @@ export async function runApp(wasmBytes, root) {
       if (el.kind === "window") {
         if (el.titleBar) el.titleBar.textContent = text;
         (el.doc ?? document).title = text;
-      } else if (el.dom._radTextEl) {
-        el.dom._radTextEl.textContent = text;
-      } else if (el.dom.tagName === "INPUT") {
-        el.dom.value = text;
-      } else if (el.dom.tagName === "IMG") {
-        el.dom.src = text;
       } else {
-        el.dom.textContent = text;
+        setTextOf(el.dom, text);
       }
     },
     rad_get_text_len(id) {
@@ -350,7 +323,8 @@ export async function runApp(wasmBytes, root) {
     // item is picked ("change"). Both only for user actions.
     rad_register_change(id, callbackId) {
       const el = elements[id];
-      const event = el.kind === KIND_TRACK_BAR ? "input" : "change";
+      // A range input (trackbar) reports while dragging ("input").
+      const event = el.dom.tagName === "INPUT" && el.dom.type === "range" ? "input" : "change";
       if (el.changeListener) el.dom.removeEventListener(event, el.changeListener);
       el.changeListener = () => instance.exports.rad_dispatch_change(callbackId);
       el.dom.addEventListener(event, el.changeListener);
