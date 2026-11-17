@@ -27,6 +27,8 @@ A rapid-application-development (RAD) framework and visual designer for Rust: dr
 
 All of them are implemented in every backend (Win32, web, web-min) and are available in the designer's toolbox.
 
+In the designer, drag a control from the toolbox onto the form, click it to select it, double-click it for its event handler, and press **Delete** to remove the selected control or timer. `form1.designer.rs` is regenerated, so the removal is immediate there. A handler stub already written into `form1.rs` is yours and is left alone: the designer warns that `form1.rs` still refers to the removed control, and a build fails with the compile error until you delete that stub. A new control never reuses the name of one that `form1.rs` still refers to.
+
 ## Build
 
 ```
