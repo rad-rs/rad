@@ -16,9 +16,11 @@ use rad_core::{Color, Window};
 use std::cell::Cell;
 use std::rc::Rc;
 
+
 pub fn build(window: &Window) -> Rc<Form1Controls> {
     let c = Rc::new(designer::build(window));
     let step = Rc::new(Cell::new(10u32));
+    let ticks = Rc::new(Cell::new(0u32));
 
     // A PictureBox with no image would be invisible, so give it a color.
     c.picture1.set_back_color(Some(Color::rgb(70, 130, 180)));
@@ -37,6 +39,19 @@ pub fn build(window: &Window) -> Rc<Form1Controls> {
         c.checkbox1.set_on_click(Box::new(move || {
             let state = if c2.checkbox1.checked() { "enabled" } else { "disabled" };
             c2.label2.set_text(&format!("Progress {state}"));
+            // The timer follows the checkbox: it only advances the bar while enabled.
+            c2.timer1.set_enabled(c2.checkbox1.checked());
+        }));
+    }
+
+    // Timer: advance the progress bar by the chosen step and count ticks.
+    {
+        let (c2, step, ticks) = (c.clone(), step.clone(), ticks.clone());
+        c.timer1.set_on_tick(Box::new(move || {
+            ticks.set(ticks.get() + 1);
+            let next = c2.progress1.value() + step.get();
+            c2.progress1.set_value(if next > 100 { 0 } else { next });
+            c2.label3.set_text(&format!("Ticks: {}", ticks.get()));
         }));
     }
 
