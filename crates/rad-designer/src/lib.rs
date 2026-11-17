@@ -28,7 +28,7 @@ mod native_build;
 
 use rad_backend_web::WebWindow;
 use rad_core::{
-    Button, CheckBox, Label, PictureBox, ProgressBar, RadioButton, TextBox, TreeView,
+    Button, CheckBox, Label, PictureBox, ProgressBar, RadioButton, TextBox, Timer, TreeView,
     WindowHandle,
 };
 use std::cell::{Cell, RefCell};
@@ -112,6 +112,9 @@ enum PlacedKind {
     ProgressBar(ProgressBar),
     PictureBox(PictureBox),
     TreeView(TreeView),
+    /// Non-visual: has no place on the form, so it lives in the component
+    /// tray below it and has no position, size or text.
+    Timer(Timer),
 }
 
 impl PlacedKind {
@@ -127,6 +130,7 @@ impl PlacedKind {
             "ProgressBar" => Self::ProgressBar(ProgressBar::new(host)),
             "PictureBox" => Self::PictureBox(PictureBox::new(host)),
             "TreeView" => Self::TreeView(TreeView::new(host)),
+            "Timer" => Self::Timer(Timer::new(host)),
             _ => return None,
         })
     }
@@ -141,6 +145,7 @@ impl PlacedKind {
             Self::ProgressBar(_) => "ProgressBar",
             Self::PictureBox(_) => "PictureBox",
             Self::TreeView(_) => "TreeView",
+            Self::Timer(_) => "Timer",
         }
     }
 
@@ -154,6 +159,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.pos(),
             Self::PictureBox(c) => c.pos(),
             Self::TreeView(c) => c.pos(),
+            Self::Timer(_) => (0, 0),
         }
     }
 
@@ -167,6 +173,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_pos(x, y),
             Self::PictureBox(c) => c.set_pos(x, y),
             Self::TreeView(c) => c.set_pos(x, y),
+            Self::Timer(_) => {}
         }
     }
 
@@ -180,6 +187,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.width(),
             Self::PictureBox(c) => c.width(),
             Self::TreeView(c) => c.width(),
+            Self::Timer(_) => 0,
         }
     }
 
@@ -193,6 +201,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_width(width),
             Self::PictureBox(c) => c.set_width(width),
             Self::TreeView(c) => c.set_width(width),
+            Self::Timer(_) => {}
         }
     }
 
@@ -206,6 +215,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.height(),
             Self::PictureBox(c) => c.height(),
             Self::TreeView(c) => c.height(),
+            Self::Timer(_) => 0,
         }
     }
 
@@ -219,6 +229,7 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_height(height),
             Self::PictureBox(c) => c.set_height(height),
             Self::TreeView(c) => c.set_height(height),
+            Self::Timer(_) => {}
         }
     }
 
@@ -233,7 +244,7 @@ impl PlacedKind {
             Self::CheckBox(c) => Some(c.text()),
             Self::TextBox(c) => Some(c.text()),
             Self::RadioButton(c) => Some(c.text()),
-            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) => None,
+            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) | Self::Timer(_) => None,
         }
     }
 
@@ -244,7 +255,7 @@ impl PlacedKind {
             Self::CheckBox(c) => c.set_text(text),
             Self::TextBox(c) => c.set_text(text),
             Self::RadioButton(c) => c.set_text(text),
-            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) => {}
+            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) | Self::Timer(_) => {}
         }
     }
 
@@ -254,6 +265,8 @@ impl PlacedKind {
         match self {
             Self::CheckBox(c) => Some(c.checked()),
             Self::RadioButton(c) => Some(c.checked()),
+            // A timer's Enabled is shown through the same checkbox row.
+            Self::Timer(c) => Some(c.enabled()),
             _ => None,
         }
     }
@@ -262,6 +275,7 @@ impl PlacedKind {
         match self {
             Self::CheckBox(c) => c.set_checked(checked),
             Self::RadioButton(c) => c.set_checked(checked),
+            Self::Timer(c) => c.set_enabled(checked),
             _ => {}
         }
     }
@@ -311,6 +325,26 @@ impl PlacedKind {
         }
     }
 
+    /// `Some` only for `Timer` — shows/hides the panel's Interval row.
+    fn interval(&self) -> Option<u32> {
+        match self {
+            Self::Timer(c) => Some(c.interval()),
+            _ => None,
+        }
+    }
+
+    fn set_interval(&mut self, interval_ms: u32) {
+        if let Self::Timer(c) = self {
+            c.set_interval(interval_ms);
+        }
+    }
+
+    /// A non-visual component: lives in the tray, not on the form, and has
+    /// no position or size to edit.
+    fn is_component(&self) -> bool {
+        matches!(self, Self::Timer(_))
+    }
+
     fn default_size(kind: &str) -> (u32, u32) {
         match kind {
             "Button" => (75, 23),
@@ -321,6 +355,8 @@ impl PlacedKind {
             "ProgressBar" => (150, 23),
             "PictureBox" => (100, 50),
             "TreeView" => (121, 97),
+            // Not drawn on the form; the size is never read.
+            "Timer" => (0, 0),
             _ => (75, 23),
         }
     }
@@ -347,13 +383,14 @@ fn parse_items_text(text: &str) -> Vec<rad_core::TreeItem> {
         .collect()
 }
 
-/// The event double-clicking a kind in the designer stubs out — "click"
-/// for every control today. A kind whose main job is firing on its own
-/// schedule rather than being clicked (a `Timer`, once one exists) would
-/// return something like "tick" here instead; nothing else about the
-/// double-click flow below depends on which event it is.
-fn default_event_name(_kind: &str) -> &'static str {
-    "click"
+/// The event double-clicking a kind in the designer stubs out: "click" for
+/// controls, "tick" for a `Timer`, whose job is firing on its own schedule.
+/// Nothing else about the double-click flow depends on which event it is.
+fn default_event_name(kind: &str) -> &'static str {
+    match kind {
+        "Timer" => "tick",
+        _ => "click",
+    }
 }
 
 /// One event handler stub the designer has created, from a double-click.
@@ -390,8 +427,10 @@ struct PropertyInputs {
     height: HtmlInputElement,
     checked: HtmlInputElement,
     value: HtmlInputElement,
+    interval: HtmlInputElement,
     image_path: HtmlInputElement,
     items: HtmlTextAreaElement,
+    checked_label: HtmlElement,
     row_name: HtmlElement,
     row_text: HtmlElement,
     row_x: HtmlElement,
@@ -400,6 +439,7 @@ struct PropertyInputs {
     row_height: HtmlElement,
     row_checked: HtmlElement,
     row_value: HtmlElement,
+    row_interval: HtmlElement,
     row_image_path: HtmlElement,
     row_items: HtmlElement,
 }
@@ -455,6 +495,8 @@ impl PropertyInputs {
             height: chrome_element(chrome, "prop-height"),
             checked: chrome_element(chrome, "prop-checked"),
             value: chrome_element(chrome, "prop-value"),
+            interval: chrome_element(chrome, "prop-interval"),
+            checked_label: chrome_element(chrome, "prop-checked-label"),
             image_path: chrome_element(chrome, "prop-image-path"),
             items: chrome_element(chrome, "prop-items"),
             row_name: chrome_element(chrome, "row-name"),
@@ -465,6 +507,7 @@ impl PropertyInputs {
             row_height: chrome_element(chrome, "row-height"),
             row_checked: chrome_element(chrome, "row-checked"),
             row_value: chrome_element(chrome, "row-value"),
+            row_interval: chrome_element(chrome, "row-interval"),
             row_image_path: chrome_element(chrome, "row-image-path"),
             row_items: chrome_element(chrome, "row-items"),
         }
@@ -746,6 +789,14 @@ fn refresh_properties(
                 )
             }
         };
+    // A non-visual component (Timer) has no position or size, and its
+    // Checked box is its Enabled flag.
+    let (is_component, interval) = match selection {
+        Selection::Control(i) => (controls[i].control.is_component(), controls[i].control.interval()),
+        _ => (false, None),
+    };
+    inputs.checked_label.set_text_content(Some(if is_component { " Enabled" } else { " Checked" }));
+    inputs.interval.set_value(&interval.map(|v| v.to_string()).unwrap_or_default());
     inputs.name.set_value(&name);
     inputs.text.set_value(text.as_deref().unwrap_or_default());
     inputs.x.set_value(&x);
@@ -760,11 +811,12 @@ fn refresh_properties(
     let visible = !matches!(selection, Selection::None);
     set_row_visible(&inputs.row_name, visible);
     set_row_visible(&inputs.row_text, text.is_some());
-    set_row_visible(&inputs.row_x, visible && has_pos);
-    set_row_visible(&inputs.row_y, visible && has_pos);
-    set_row_visible(&inputs.row_width, visible);
-    set_row_visible(&inputs.row_height, visible);
+    set_row_visible(&inputs.row_x, visible && has_pos && !is_component);
+    set_row_visible(&inputs.row_y, visible && has_pos && !is_component);
+    set_row_visible(&inputs.row_width, visible && !is_component);
+    set_row_visible(&inputs.row_height, visible && !is_component);
     set_row_visible(&inputs.row_checked, checked.is_some());
+    set_row_visible(&inputs.row_interval, interval.is_some());
     set_row_visible(&inputs.row_value, value.is_some());
     set_row_visible(&inputs.row_image_path, image_path.is_some());
     set_row_visible(&inputs.row_items, items_text.is_some());
@@ -795,6 +847,9 @@ fn apply_properties(
             if c.control.checked().is_some() {
                 c.control.set_checked(inputs.checked.checked());
             }
+            if c.control.interval().is_some() {
+                c.control.set_interval(parse_u32(&inputs.interval, 100).max(1));
+            }
             if c.control.value().is_some() {
                 c.control.set_value(parse_u32(&inputs.value, 0).min(100));
             }
@@ -804,7 +859,43 @@ fn apply_properties(
             if c.control.items_text().is_some() {
                 c.control.set_items_text(&inputs.items.value());
             }
-            position_overlay(control_overlay, &c.element);
+            show_selection(control_overlay, c);
+            render_chip(c);
+        }
+    }
+}
+
+/// Draws the selection box around `c`, or hides it for a component: those
+/// live in the tray, whose chips show their own selected state.
+fn show_selection(control_overlay: &HtmlElement, c: &PlacedControl) {
+    if c.control.is_component() {
+        hide_overlay(control_overlay);
+    } else {
+        position_overlay(control_overlay, &c.element);
+    }
+}
+
+/// Redraws a component's tray chip: a state dot, its name and its interval.
+/// A no-op for an ordinary control, which draws itself on the form.
+fn render_chip(c: &PlacedControl) {
+    let (Some(interval), Some(enabled)) = (c.control.interval(), c.control.checked()) else {
+        return;
+    };
+    c.element.set_inner_html(&format!(
+        "<span class=\"dot\"></span><span class=\"chip-name\">{}</span><span class=\"chip-meta\">{} ms</span>",
+        c.name, interval
+    ));
+    c.element.class_list().toggle_with_force("on", enabled).ok();
+}
+
+/// Marks `selected` (a chip) as the only selected one in the tray, or clears
+/// the tray's selection when `None`.
+fn mark_tray_selection(tray: &Element, selected: Option<&Element>) {
+    let chips = tray.children();
+    for i in 0..chips.length() {
+        if let Some(chip) = chips.item(i) {
+            let is_selected = selected.is_some_and(|s| Node::is_same_node(&chip, Some(s)));
+            chip.class_list().toggle_with_force("selected", is_selected).ok();
         }
     }
 }
@@ -845,6 +936,12 @@ pub fn start() {
         .expect("frame.html must have #rad-stage");
 
     let window = Rc::new(WebWindow::new(&stage, "Form1", 400, 260));
+    // Non-visual components (a Timer) have no place on the form itself; they
+    // sit in a strip below it, as chips, the way VS shows a form's component
+    // tray.
+    let tray = preview.create_element("div").expect("create the component tray");
+    tray.set_id("rad-tray");
+    stage.append_child(&tray).ok();
     let controls: Rc<RefCell<Vec<PlacedControl>>> = Rc::new(RefCell::new(Vec::new()));
     let selection: Rc<Cell<Selection>> = Rc::new(Cell::new(Selection::None));
     let inputs = Rc::new(PropertyInputs::new(&chrome));
@@ -955,8 +1052,10 @@ pub fn start() {
         let inputs = inputs.clone();
         let form_overlay = form_overlay.clone();
         let control_overlay = control_overlay.clone();
+        let tray = tray.clone();
         Closure::wrap(Box::new(move |_: MouseEvent| {
             selection.set(Selection::Form);
+            mark_tray_selection(&tray, None);
             hide_overlay(&control_overlay);
             position_overlay(&form_overlay, window.element());
             refresh_properties(&inputs, selection.get(), &window, &controls.borrow());
@@ -992,6 +1091,7 @@ pub fn start() {
         let inputs = inputs.clone();
         let form_overlay = form_overlay.clone();
         let control_overlay = control_overlay.clone();
+        let tray = tray.clone();
         Closure::wrap(Box::new(move |e: MouseEvent| {
             let Some(target) = e.target().and_then(|t| t.dyn_into::<HtmlElement>().ok()) else {
                 return;
@@ -1005,6 +1105,7 @@ pub fn start() {
             };
             e.stop_propagation();
             selection.set(Selection::Control(index));
+            mark_tray_selection(&tray, None);
             hide_overlay(&form_overlay);
             position_overlay(&control_overlay, &controls_ref[index].element);
             refresh_properties(&inputs, selection.get(), &window, &controls_ref);
@@ -1036,6 +1137,58 @@ pub fn start() {
         .ok();
     on_control_dblclick.forget();
 
+    // Component chips in the tray: click selects (properties panel, no
+    // selection box since they are not on the form), double-click opens the
+    // component's default event handler, same as a control.
+    let find_chip = |e: &MouseEvent| -> Option<Element> {
+        e.target()
+            .and_then(|t| t.dyn_into::<Element>().ok())
+            .and_then(|t| t.closest(".rad-chip").ok().flatten())
+    };
+    let on_tray_click = {
+        let window = window.clone();
+        let controls = controls.clone();
+        let selection = selection.clone();
+        let inputs = inputs.clone();
+        let form_overlay = form_overlay.clone();
+        let control_overlay = control_overlay.clone();
+        let tray = tray.clone();
+        Closure::wrap(Box::new(move |e: MouseEvent| {
+            let Some(chip) = find_chip(&e) else { return };
+            let controls_ref = controls.borrow();
+            let Some(index) = controls_ref.iter().position(|c| Node::is_same_node(&c.element, Some(&chip)))
+            else {
+                return;
+            };
+            e.stop_propagation();
+            selection.set(Selection::Control(index));
+            hide_overlay(&form_overlay);
+            hide_overlay(&control_overlay);
+            mark_tray_selection(&tray, Some(&chip));
+            refresh_properties(&inputs, selection.get(), &window, &controls_ref);
+        }) as Box<dyn FnMut(MouseEvent)>)
+    };
+    tray.add_event_listener_with_callback("click", on_tray_click.as_ref().unchecked_ref()).ok();
+    on_tray_click.forget();
+
+    let on_tray_dblclick = {
+        let controls = controls.clone();
+        let refs = refs.clone();
+        Closure::wrap(Box::new(move |e: MouseEvent| {
+            let Some(chip) = find_chip(&e) else { return };
+            let controls_ref = controls.borrow();
+            let Some(control) = controls_ref.iter().find(|c| Node::is_same_node(&c.element, Some(&chip)))
+            else {
+                return;
+            };
+            e.stop_propagation();
+            let event = default_event_name(control.control.kind_name());
+            open_handler(&refs, HandlerTarget::Control(control.name.clone()), event, &control.name);
+        }) as Box<dyn FnMut(MouseEvent)>)
+    };
+    tray.add_event_listener_with_callback("dblclick", on_tray_dblclick.as_ref().unchecked_ref()).ok();
+    on_tray_dblclick.forget();
+
     // Allow drop: the body — and, per spec, dragenter too — must cancel
     // the default, or "drop" never fires.
     let on_dragover = Closure::wrap(Box::new(move |e: DragEvent| {
@@ -1056,6 +1209,8 @@ pub fn start() {
         let body = body.clone();
         let controls = controls.clone();
         let grab_offset = grab_offset.clone();
+        let tray = tray.clone();
+        let preview = preview.clone();
         Closure::wrap(Box::new(move |e: DragEvent| {
             e.prevent_default();
             let Some(kind) = e.data_transfer().and_then(|dt| dt.get_data("text/plain").ok())
@@ -1073,6 +1228,35 @@ pub fn start() {
             let Some(mut control) = PlacedKind::new(&kind, &window, &name) else {
                 return;
             };
+            if control.is_component() {
+                // No element on the form: a chip in the tray stands for it.
+                // A freshly dropped timer starts running once a second, so
+                // it is obviously alive; the generated code states both
+                // values, so nothing depends on this default.
+                control.set_interval(1000);
+                control.set_checked(true);
+                let chip: HtmlElement = preview
+                    .create_element("div")
+                    .expect("create a tray chip")
+                    .dyn_into()
+                    .expect("a tray chip is an HtmlElement");
+                chip.set_class_name("rad-chip");
+                tray.append_child(&chip).ok();
+                tray.class_list().add_1("has-items").ok();
+                // User code only runs in a built app, so the preview timer
+                // has no handler of its own; blink the chip's dot on every
+                // tick so a running timer is visibly ticking in the designer.
+                if let PlacedKind::Timer(timer) = &control {
+                    let chip = chip.clone();
+                    timer.set_on_tick(Box::new(move || {
+                        chip.class_list().toggle("blink").ok();
+                    }));
+                }
+                let placed = PlacedControl { name, control, element: chip };
+                render_chip(&placed);
+                controls.borrow_mut().push(placed);
+                return;
+            }
             let (default_width, default_height) = PlacedKind::default_size(&kind);
             control.set_pos(x, y);
             control.set_width(default_width);
@@ -1130,7 +1314,7 @@ pub fn start() {
     // Properties panel: any field's "change" re-applies the whole set from
     // the inputs (simpler than tracking which single field fired, and just
     // as correct since the others are unchanged).
-    for field in [&inputs.text, &inputs.x, &inputs.y, &inputs.width, &inputs.height, &inputs.checked] {
+    for field in [&inputs.text, &inputs.x, &inputs.y, &inputs.width, &inputs.height, &inputs.checked, &inputs.interval] {
         let on_change = {
             let window = window.clone();
             let controls = controls.clone();
@@ -1187,7 +1371,7 @@ pub fn start() {
             match selection.get() {
                 Selection::None => {}
                 Selection::Form => position_overlay(&form_overlay, window.element()),
-                Selection::Control(i) => position_overlay(&control_overlay, &controls[i].element),
+                Selection::Control(i) => show_selection(&control_overlay, &controls[i]),
             }
             refresh_properties(&inputs, selection.get(), &window, &controls);
         }) as Box<dyn FnMut(Event)>)
@@ -1663,14 +1847,25 @@ fn generate_designer_source(controls: &[PlacedControl]) -> String {
             // `ProgressBar`/`PictureBox`/`TreeView` take no text.
             (_, None) => format!("{kind}::new(window)"),
         };
-        src.push_str(&format!(
-            "    let {name} = {ctor};\n\
-             \x20   {name}.set_pos({x}, {y});\n\
-             \x20   {name}.set_width({width});\n\
-             \x20   {name}.set_height({height});\n",
-        ));
+        src.push_str(&format!("    let {name} = {ctor};\n"));
+        if let Some(interval) = c.control.interval() {
+            // A Timer is a non-visual component: no position or size, just
+            // its schedule.
+            src.push_str(&format!("    {name}.set_interval({interval});\n"));
+        }
+        if !c.control.is_component() {
+            src.push_str(&format!(
+                "    {name}.set_pos({x}, {y});\n\
+                 \x20   {name}.set_width({width});\n\
+                 \x20   {name}.set_height({height});\n",
+            ));
+        }
         if let Some(checked) = c.control.checked() {
-            src.push_str(&format!("    {name}.set_checked({checked});\n"));
+            if c.control.is_component() {
+                src.push_str(&format!("    {name}.set_enabled({checked});\n"));
+            } else {
+                src.push_str(&format!("    {name}.set_checked({checked});\n"));
+            }
         }
         if let Some(value) = c.control.value() {
             src.push_str(&format!("    {name}.set_value({value});\n"));

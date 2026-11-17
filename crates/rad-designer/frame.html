@@ -30,6 +30,28 @@
     display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   }
 
+  /* Component tray: non-visual components (Timer) have no place on the form,
+     so each is a chip in a strip below it. Hidden until the first one. */
+  #rad-tray {
+    display: none; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 10px; padding: 6px 8px; width: fit-content; max-width: 100%;
+    border: 1px dashed #aaa; background: rgba(255, 255, 255, 0.6);
+    font: 12px "Segoe UI", sans-serif; color: #333;
+  }
+  #rad-tray.has-items { display: flex; }
+  #rad-tray::before { content: "Components"; color: #777; font-size: 11px; margin-right: 4px; }
+  .rad-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+    border: 1px solid #bbb; border-radius: 3px; background: #fff;
+    cursor: pointer; user-select: none;
+  }
+  .rad-chip:hover { border-color: #7aa7d0; }
+  .rad-chip.selected { border-color: #0078d7; box-shadow: 0 0 0 1px #0078d7; background: #e5f1fb; }
+  .rad-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: #bbb; }
+  .rad-chip.on .dot { background: #2e9c3a; }
+  .rad-chip.on.blink .dot { background: #a6e8ad; }
+  .rad-chip .chip-meta { color: #777; }
+
   /* Design-time selection: dashed box + 8 handles, VS-style. Purely
      visual for now — pointer-events:none so it never blocks clicks or
      the drag-to-reposition behavior on whatever it's drawn over. */

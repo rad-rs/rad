@@ -210,6 +210,8 @@
       <div class="palette-item" data-kind="ProgressBar" draggable="true"><span class="palette-icon">&#9646;</span>ProgressBar</div>
       <div class="palette-item" data-kind="PictureBox" draggable="true"><span class="palette-icon">&#9634;</span>PictureBox</div>
       <div class="palette-item" data-kind="TreeView" draggable="true"><span class="palette-icon">&#8862;</span>TreeView</div>
+      <div class="palette-group-header">Components</div>
+      <div class="palette-item" data-kind="Timer" draggable="true"><span class="palette-icon">&#9201;</span>Timer</div>
     </div>
 
     <!-- Last in source order within this grid on purpose: everything the
@@ -226,8 +228,9 @@
       <div class="prop-row" id="row-width"><label>Width</label><input id="prop-width" type="number" /></div>
       <div class="prop-row" id="row-height"><label>Height</label><input id="prop-height" type="number" /></div>
       <div class="prop-row" id="row-checked">
-        <label><input id="prop-checked" type="checkbox" style="width:auto;" /> Checked</label>
+        <label><input id="prop-checked" type="checkbox" style="width:auto;" /><span id="prop-checked-label"> Checked</span></label>
       </div>
+      <div class="prop-row" id="row-interval"><label>Interval (ms)</label><input id="prop-interval" type="number" min="1" /></div>
       <div class="prop-row" id="row-value"><label>Value</label><input id="prop-value" type="number" min="0" max="100" /></div>
       <div class="prop-row" id="row-image-path"><label>Image path</label><input id="prop-image-path" placeholder="C:\path\to\image.bmp" /></div>
       <div class="prop-row" id="row-items">
