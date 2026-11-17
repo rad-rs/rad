@@ -21,7 +21,7 @@ unsafe extern "system" {
 
 fn main() {
     let backend = rad_backend_win32::Win32Backend;
-    let window = Window::new(&backend, "All controls demo", 460, 410);
+    let window = Window::new(&backend, "All controls demo", 460, 520);
     let controls = form1::build(&window);
 
     unsafe {

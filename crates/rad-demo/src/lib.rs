@@ -18,7 +18,7 @@ pub fn start() {
 
     let backend = WebBackend::new(root);
 
-    let window = Window::new(&backend, "All controls demo", 460, 410);
+    let window = Window::new(&backend, "All controls demo", 460, 520);
     window.on_resize(|w, h| {
         web_sys::console::log_1(&format!("resized to {w}x{h}").into());
     });

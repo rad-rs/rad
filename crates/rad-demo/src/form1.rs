@@ -71,6 +71,38 @@ pub fn build(window: &Window) -> Rc<Form1Controls> {
         }));
     }
 
+    // TrackBar: sets the timer's interval, in milliseconds.
+    {
+        let c2 = c.clone();
+        c.trackbar1.set_on_change(Box::new(move || {
+            let interval = c2.trackbar1.value().max(1) as u32;
+            c2.timer1.set_interval(interval);
+            c2.label2.set_text(&format!("Timer interval: {interval} ms"));
+        }));
+    }
+
+    // ComboBox: recolours the PictureBox.
+    {
+        let c2 = c.clone();
+        c.combobox1.set_on_change(Box::new(move || {
+            let color = match c2.combobox1.selected_index() {
+                Some(1) => Color::rgb(230, 126, 34),
+                Some(2) => Color::rgb(39, 174, 96),
+                _ => Color::rgb(70, 130, 180),
+            };
+            c2.picture1.set_back_color(Some(color));
+            c2.label2.set_text(&format!("Colour: {}", c2.combobox1.text()));
+        }));
+    }
+
+    // ListBox: reports the selection.
+    {
+        let c2 = c.clone();
+        c.listbox1.set_on_change(Box::new(move || {
+            c2.label2.set_text(&format!("Selected: {}", c2.listbox1.text()));
+        }));
+    }
+
     // Step button: advances the ProgressBar, wrapping past 100%.
     {
         let (c2, step) = (c.clone(), step.clone());
