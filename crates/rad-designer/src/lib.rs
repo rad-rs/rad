@@ -28,8 +28,8 @@ mod native_build;
 
 use rad_backend_web::WebWindow;
 use rad_core::{
-    Button, CheckBox, Label, PictureBox, ProgressBar, RadioButton, TextBox, Timer, TreeView,
-    WindowHandle,
+    Button, CheckBox, ComboBox, Label, ListBox, PictureBox, ProgressBar, RadioButton, TextBox,
+    Timer, TrackBar, TreeView, WindowHandle,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -112,6 +112,9 @@ enum PlacedKind {
     ProgressBar(ProgressBar),
     PictureBox(PictureBox),
     TreeView(TreeView),
+    TrackBar(TrackBar),
+    ComboBox(ComboBox),
+    ListBox(ListBox),
     /// Non-visual: has no place on the form, so it lives in the component
     /// tray below it and has no position, size or text.
     Timer(Timer),
@@ -130,6 +133,9 @@ impl PlacedKind {
             "ProgressBar" => Self::ProgressBar(ProgressBar::new(host)),
             "PictureBox" => Self::PictureBox(PictureBox::new(host)),
             "TreeView" => Self::TreeView(TreeView::new(host)),
+            "TrackBar" => Self::TrackBar(TrackBar::new(host)),
+            "ComboBox" => Self::ComboBox(ComboBox::new(host)),
+            "ListBox" => Self::ListBox(ListBox::new(host)),
             "Timer" => Self::Timer(Timer::new(host)),
             _ => return None,
         })
@@ -145,6 +151,9 @@ impl PlacedKind {
             Self::ProgressBar(_) => "ProgressBar",
             Self::PictureBox(_) => "PictureBox",
             Self::TreeView(_) => "TreeView",
+            Self::TrackBar(_) => "TrackBar",
+            Self::ComboBox(_) => "ComboBox",
+            Self::ListBox(_) => "ListBox",
             Self::Timer(_) => "Timer",
         }
     }
@@ -159,6 +168,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.pos(),
             Self::PictureBox(c) => c.pos(),
             Self::TreeView(c) => c.pos(),
+            Self::TrackBar(c) => c.pos(),
+            Self::ComboBox(c) => c.pos(),
+            Self::ListBox(c) => c.pos(),
             Self::Timer(_) => (0, 0),
         }
     }
@@ -173,6 +185,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_pos(x, y),
             Self::PictureBox(c) => c.set_pos(x, y),
             Self::TreeView(c) => c.set_pos(x, y),
+            Self::TrackBar(c) => c.set_pos(x, y),
+            Self::ComboBox(c) => c.set_pos(x, y),
+            Self::ListBox(c) => c.set_pos(x, y),
             Self::Timer(_) => {}
         }
     }
@@ -187,6 +202,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.width(),
             Self::PictureBox(c) => c.width(),
             Self::TreeView(c) => c.width(),
+            Self::TrackBar(c) => c.width(),
+            Self::ComboBox(c) => c.width(),
+            Self::ListBox(c) => c.width(),
             Self::Timer(_) => 0,
         }
     }
@@ -201,6 +219,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_width(width),
             Self::PictureBox(c) => c.set_width(width),
             Self::TreeView(c) => c.set_width(width),
+            Self::TrackBar(c) => c.set_width(width),
+            Self::ComboBox(c) => c.set_width(width),
+            Self::ListBox(c) => c.set_width(width),
             Self::Timer(_) => {}
         }
     }
@@ -215,6 +236,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.height(),
             Self::PictureBox(c) => c.height(),
             Self::TreeView(c) => c.height(),
+            Self::TrackBar(c) => c.height(),
+            Self::ComboBox(c) => c.height(),
+            Self::ListBox(c) => c.height(),
             Self::Timer(_) => 0,
         }
     }
@@ -229,6 +253,9 @@ impl PlacedKind {
             Self::ProgressBar(c) => c.set_height(height),
             Self::PictureBox(c) => c.set_height(height),
             Self::TreeView(c) => c.set_height(height),
+            Self::TrackBar(c) => c.set_height(height),
+            Self::ComboBox(c) => c.set_height(height),
+            Self::ListBox(c) => c.set_height(height),
             Self::Timer(_) => {}
         }
     }
@@ -244,7 +271,13 @@ impl PlacedKind {
             Self::CheckBox(c) => Some(c.text()),
             Self::TextBox(c) => Some(c.text()),
             Self::RadioButton(c) => Some(c.text()),
-            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) | Self::Timer(_) => None,
+            Self::ProgressBar(_)
+            | Self::PictureBox(_)
+            | Self::TreeView(_)
+            | Self::TrackBar(_)
+            | Self::ComboBox(_)
+            | Self::ListBox(_)
+            | Self::Timer(_) => None,
         }
     }
 
@@ -255,7 +288,13 @@ impl PlacedKind {
             Self::CheckBox(c) => c.set_text(text),
             Self::TextBox(c) => c.set_text(text),
             Self::RadioButton(c) => c.set_text(text),
-            Self::ProgressBar(_) | Self::PictureBox(_) | Self::TreeView(_) | Self::Timer(_) => {}
+            Self::ProgressBar(_)
+            | Self::PictureBox(_)
+            | Self::TreeView(_)
+            | Self::TrackBar(_)
+            | Self::ComboBox(_)
+            | Self::ListBox(_)
+            | Self::Timer(_) => {}
         }
     }
 
@@ -280,17 +319,61 @@ impl PlacedKind {
         }
     }
 
-    /// `Some` only for `ProgressBar` — shows/hides the panel's Value row.
-    fn value(&self) -> Option<u32> {
+    /// `Some` for `ProgressBar` and `TrackBar` — shows/hides the panel's
+    /// Value row.
+    fn value(&self) -> Option<i32> {
         match self {
-            Self::ProgressBar(c) => Some(c.value()),
+            Self::ProgressBar(c) => Some(c.value() as i32),
+            Self::TrackBar(c) => Some(c.value()),
             _ => None,
         }
     }
 
-    fn set_value(&mut self, value: u32) {
-        if let Self::ProgressBar(c) = self {
-            c.set_value(value);
+    fn set_value(&mut self, value: i32) {
+        match self {
+            Self::ProgressBar(c) => c.set_value(value.clamp(0, 100) as u32),
+            // The backend clamps to the trackbar's own range.
+            Self::TrackBar(c) => c.set_value(value),
+            _ => {}
+        }
+    }
+
+    /// `Some((minimum, maximum))` only for `TrackBar`.
+    fn range(&self) -> Option<(i32, i32)> {
+        match self {
+            Self::TrackBar(c) => Some((c.minimum(), c.maximum())),
+            _ => None,
+        }
+    }
+
+    fn set_range(&mut self, minimum: i32, maximum: i32) {
+        if let Self::TrackBar(c) = self {
+            // Widen before narrowing so the range is never momentarily empty.
+            if maximum >= c.maximum() {
+                c.set_maximum(maximum);
+                c.set_minimum(minimum);
+            } else {
+                c.set_minimum(minimum);
+                c.set_maximum(maximum);
+            }
+        }
+    }
+
+    /// `Some` for list-like kinds: the selected item's index, `-1` for none.
+    fn selected_index(&self) -> Option<i32> {
+        match self {
+            Self::ComboBox(c) => Some(c.selected_index().map_or(-1, |i| i as i32)),
+            Self::ListBox(c) => Some(c.selected_index().map_or(-1, |i| i as i32)),
+            _ => None,
+        }
+    }
+
+    fn set_selected_index(&mut self, index: i32) {
+        let index = usize::try_from(index).ok();
+        match self {
+            Self::ComboBox(c) => c.set_selected_index(index),
+            Self::ListBox(c) => c.set_selected_index(index),
+            _ => {}
         }
     }
 
@@ -315,13 +398,19 @@ impl PlacedKind {
     fn items_text(&self) -> Option<String> {
         match self {
             Self::TreeView(c) => Some(format_items_text(&c.items())),
+            Self::ComboBox(c) => Some(c.items().join("\n")),
+            Self::ListBox(c) => Some(c.items().join("\n")),
             _ => None,
         }
     }
 
     fn set_items_text(&mut self, text: &str) {
-        if let Self::TreeView(c) = self {
-            c.set_items(&parse_items_text(text));
+        match self {
+            Self::TreeView(c) => c.set_items(&parse_items_text(text)),
+            // One item per line, surrounding spaces ignored.
+            Self::ComboBox(c) => c.set_items(&parse_list_items(text)),
+            Self::ListBox(c) => c.set_items(&parse_list_items(text)),
+            _ => {}
         }
     }
 
@@ -355,6 +444,9 @@ impl PlacedKind {
             "ProgressBar" => (150, 23),
             "PictureBox" => (100, 50),
             "TreeView" => (121, 97),
+            "TrackBar" => (150, 30),
+            "ComboBox" => (121, 21),
+            "ListBox" => (120, 95),
             // Not drawn on the form; the size is never read.
             "Timer" => (0, 0),
             _ => (75, 23),
@@ -373,6 +465,10 @@ fn format_items_text(items: &[rad_core::TreeItem]) -> String {
         .join("\n")
 }
 
+fn parse_list_items(text: &str) -> Vec<String> {
+    text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect()
+}
+
 fn parse_items_text(text: &str) -> Vec<rad_core::TreeItem> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
@@ -389,6 +485,7 @@ fn parse_items_text(text: &str) -> Vec<rad_core::TreeItem> {
 fn default_event_name(kind: &str) -> &'static str {
     match kind {
         "Timer" => "tick",
+        "TrackBar" | "ComboBox" | "ListBox" => "change",
         _ => "click",
     }
 }
@@ -428,6 +525,9 @@ struct PropertyInputs {
     checked: HtmlInputElement,
     value: HtmlInputElement,
     interval: HtmlInputElement,
+    minimum: HtmlInputElement,
+    maximum: HtmlInputElement,
+    selected: HtmlInputElement,
     image_path: HtmlInputElement,
     items: HtmlTextAreaElement,
     checked_label: HtmlElement,
@@ -440,6 +540,8 @@ struct PropertyInputs {
     row_checked: HtmlElement,
     row_value: HtmlElement,
     row_interval: HtmlElement,
+    row_range: HtmlElement,
+    row_selected: HtmlElement,
     row_image_path: HtmlElement,
     row_items: HtmlElement,
 }
@@ -496,6 +598,9 @@ impl PropertyInputs {
             checked: chrome_element(chrome, "prop-checked"),
             value: chrome_element(chrome, "prop-value"),
             interval: chrome_element(chrome, "prop-interval"),
+            minimum: chrome_element(chrome, "prop-minimum"),
+            maximum: chrome_element(chrome, "prop-maximum"),
+            selected: chrome_element(chrome, "prop-selected"),
             checked_label: chrome_element(chrome, "prop-checked-label"),
             image_path: chrome_element(chrome, "prop-image-path"),
             items: chrome_element(chrome, "prop-items"),
@@ -508,6 +613,8 @@ impl PropertyInputs {
             row_checked: chrome_element(chrome, "row-checked"),
             row_value: chrome_element(chrome, "row-value"),
             row_interval: chrome_element(chrome, "row-interval"),
+            row_range: chrome_element(chrome, "row-range"),
+            row_selected: chrome_element(chrome, "row-selected"),
             row_image_path: chrome_element(chrome, "row-image-path"),
             row_items: chrome_element(chrome, "row-items"),
         }
@@ -791,10 +898,16 @@ fn refresh_properties(
         };
     // A non-visual component (Timer) has no position or size, and its
     // Checked box is its Enabled flag.
-    let (is_component, interval) = match selection {
-        Selection::Control(i) => (controls[i].control.is_component(), controls[i].control.interval()),
-        _ => (false, None),
+    let (is_component, interval, range, selected) = match selection {
+        Selection::Control(i) => {
+            let c = &controls[i].control;
+            (c.is_component(), c.interval(), c.range(), c.selected_index())
+        }
+        _ => (false, None, None, None),
     };
+    inputs.minimum.set_value(&range.map(|(min, _)| min.to_string()).unwrap_or_default());
+    inputs.maximum.set_value(&range.map(|(_, max)| max.to_string()).unwrap_or_default());
+    inputs.selected.set_value(&selected.map(|i| i.to_string()).unwrap_or_default());
     inputs.checked_label.set_text_content(Some(if is_component { " Enabled" } else { " Checked" }));
     inputs.interval.set_value(&interval.map(|v| v.to_string()).unwrap_or_default());
     inputs.name.set_value(&name);
@@ -817,6 +930,8 @@ fn refresh_properties(
     set_row_visible(&inputs.row_height, visible && !is_component);
     set_row_visible(&inputs.row_checked, checked.is_some());
     set_row_visible(&inputs.row_interval, interval.is_some());
+    set_row_visible(&inputs.row_range, range.is_some());
+    set_row_visible(&inputs.row_selected, selected.is_some());
     set_row_visible(&inputs.row_value, value.is_some());
     set_row_visible(&inputs.row_image_path, image_path.is_some());
     set_row_visible(&inputs.row_items, items_text.is_some());
@@ -850,8 +965,14 @@ fn apply_properties(
             if c.control.interval().is_some() {
                 c.control.set_interval(parse_u32(&inputs.interval, 100).max(1));
             }
+            if c.control.range().is_some() {
+                c.control.set_range(parse_i32(&inputs.minimum, 0), parse_i32(&inputs.maximum, 100));
+            }
             if c.control.value().is_some() {
-                c.control.set_value(parse_u32(&inputs.value, 0).min(100));
+                c.control.set_value(parse_i32(&inputs.value, 0));
+            }
+            if c.control.selected_index().is_some() {
+                c.control.set_selected_index(parse_i32(&inputs.selected, -1));
             }
             if c.control.image_path().is_some() {
                 c.control.set_image_path(&inputs.image_path.value());
@@ -1314,7 +1435,7 @@ pub fn start() {
     // Properties panel: any field's "change" re-applies the whole set from
     // the inputs (simpler than tracking which single field fired, and just
     // as correct since the others are unchanged).
-    for field in [&inputs.text, &inputs.x, &inputs.y, &inputs.width, &inputs.height, &inputs.checked, &inputs.interval] {
+    for field in [&inputs.text, &inputs.x, &inputs.y, &inputs.width, &inputs.height, &inputs.checked, &inputs.interval, &inputs.minimum, &inputs.maximum, &inputs.selected] {
         let on_change = {
             let window = window.clone();
             let controls = controls.clone();
@@ -1867,6 +1988,10 @@ fn generate_designer_source(controls: &[PlacedControl]) -> String {
                 src.push_str(&format!("    {name}.set_checked({checked});\n"));
             }
         }
+        if let Some((minimum, maximum)) = c.control.range() {
+            // Range before value: the value is clamped to it.
+            src.push_str(&format!("    {name}.set_minimum({minimum});\n    {name}.set_maximum({maximum});\n"));
+        }
         if let Some(value) = c.control.value() {
             src.push_str(&format!("    {name}.set_value({value});\n"));
         }
@@ -1874,12 +1999,23 @@ fn generate_designer_source(controls: &[PlacedControl]) -> String {
             src.push_str(&format!("    {name}.set_image_path(\"{path}\");\n"));
         }
         if let Some(items) = c.control.items_text().filter(|t| !t.trim().is_empty()) {
-            let items_literal = parse_items_text(&items)
-                .iter()
-                .map(|(depth, text)| format!("({depth}, \"{text}\".to_string())"))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let items_literal = if matches!(c.control, PlacedKind::TreeView(_)) {
+                parse_items_text(&items)
+                    .iter()
+                    .map(|(depth, text)| format!("({depth}, \"{text}\".to_string())"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                parse_list_items(&items)
+                    .iter()
+                    .map(|text| format!("\"{text}\".to_string()"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
             src.push_str(&format!("    {name}.set_items(&[{items_literal}]);\n"));
+        }
+        if let Some(index) = c.control.selected_index().filter(|i| *i >= 0) {
+            src.push_str(&format!("    {name}.set_selected_index(Some({index}));\n"));
         }
         src.push('\n');
     }

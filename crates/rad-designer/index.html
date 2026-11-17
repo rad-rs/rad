@@ -206,6 +206,9 @@
       <div class="palette-item" data-kind="CheckBox" draggable="true"><span class="palette-icon">&#10003;</span>CheckBox</div>
       <div class="palette-item" data-kind="TextBox" draggable="true"><span class="palette-icon">ab</span>TextBox</div>
       <div class="palette-item" data-kind="RadioButton" draggable="true"><span class="palette-icon">&#9679;</span>RadioButton</div>
+      <div class="palette-item" data-kind="ComboBox" draggable="true"><span class="palette-icon">&#9662;</span>ComboBox</div>
+      <div class="palette-item" data-kind="ListBox" draggable="true"><span class="palette-icon">&#9776;</span>ListBox</div>
+      <div class="palette-item" data-kind="TrackBar" draggable="true"><span class="palette-icon">&#9644;</span>TrackBar</div>
       <div class="palette-group-header">Display</div>
       <div class="palette-item" data-kind="ProgressBar" draggable="true"><span class="palette-icon">&#9646;</span>ProgressBar</div>
       <div class="palette-item" data-kind="PictureBox" draggable="true"><span class="palette-icon">&#9634;</span>PictureBox</div>
@@ -231,10 +234,15 @@
         <label><input id="prop-checked" type="checkbox" style="width:auto;" /><span id="prop-checked-label"> Checked</span></label>
       </div>
       <div class="prop-row" id="row-interval"><label>Interval (ms)</label><input id="prop-interval" type="number" min="1" /></div>
-      <div class="prop-row" id="row-value"><label>Value</label><input id="prop-value" type="number" min="0" max="100" /></div>
+      <div class="prop-row" id="row-range">
+        <label>Minimum</label><input id="prop-minimum" type="number" />
+        <label style="margin-top:6px;">Maximum</label><input id="prop-maximum" type="number" />
+      </div>
+      <div class="prop-row" id="row-value"><label>Value</label><input id="prop-value" type="number" /></div>
+      <div class="prop-row" id="row-selected"><label>Selected index (-1 = none)</label><input id="prop-selected" type="number" min="-1" /></div>
       <div class="prop-row" id="row-image-path"><label>Image path</label><input id="prop-image-path" placeholder="C:\path\to\image.bmp" /></div>
       <div class="prop-row" id="row-items">
-        <label>Items (indent with spaces to nest)</label>
+        <label>Items (one per line; a tree view nests by indenting)</label>
         <textarea id="prop-items" rows="5" style="width:100%; box-sizing:border-box; font:12px 'Segoe UI', sans-serif; border:1px solid #adadad; resize:vertical;"></textarea>
       </div>
     </div>
