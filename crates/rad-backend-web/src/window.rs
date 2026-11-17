@@ -4,7 +4,7 @@ use crate::{
 };
 use rad_core::{
     Backend, ButtonHandle, CheckBoxHandle, Host, LabelHandle, PictureBoxHandle, ProgressBarHandle,
-    RadioButtonHandle, TextBoxHandle, TreeViewHandle, WindowHandle,
+    RadioButtonHandle, TextBoxHandle, TimerHandle, TreeViewHandle, WindowHandle,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -267,5 +267,9 @@ impl Host for WebWindow {
         el.style().set_property("border", "1px solid #adadad").ok();
         el.style().set_property("background", "#fff").ok();
         Box::new(WebTreeViewHandle::new_draggable(el))
+    }
+
+    fn create_timer(&self) -> Box<dyn TimerHandle> {
+        Box::new(crate::WebTimerHandle::new())
     }
 }

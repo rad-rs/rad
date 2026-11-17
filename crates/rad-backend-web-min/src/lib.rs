@@ -21,10 +21,11 @@
 
 use rad_core::{
     Backend, ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TreeItem, TreeViewHandle, WidgetHandle,
-    WindowHandle,
+    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeItem, TreeViewHandle,
+    WidgetHandle, WindowHandle,
 };
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 mod ffi {
     #[link(wasm_import_module = "env")]
@@ -70,6 +71,14 @@ mod ffi {
         /// `"<depth>\t<text>"` — simplest way to send a whole list in
         /// one call without a separate FFI shape per field.
         pub fn rad_set_tree_items(id: u32, ptr: *const u8, len: u32);
+
+        /// Timers have no DOM node: `rad_create_timer` just reserves an id
+        /// in the JS runtime's own timer table.
+        pub fn rad_create_timer() -> u32;
+        /// (Re)starts the timer's `setInterval` when `enabled` is nonzero,
+        /// otherwise stops it. Ticks come back through `rad_dispatch_tick`.
+        pub fn rad_timer_set(id: u32, interval_ms: u32, enabled: u32);
+        pub fn rad_timer_destroy(id: u32);
     }
 }
 
@@ -104,6 +113,40 @@ fn store_resize_callback(callback: Box<dyn FnMut(u32, u32)>) -> u32 {
         callbacks.push(Some(callback));
         (callbacks.len() - 1) as u32
     })
+}
+
+struct TimerSlot {
+    callback: RefCell<Option<Box<dyn FnMut()>>>,
+    alive: Cell<bool>,
+}
+
+impl TimerSlot {
+    /// Runs the callback taken out of its slot, so a handler may stop or
+    /// retune its own timer, or replace its own callback, without a
+    /// re-entrancy panic.
+    fn tick(&self) {
+        let taken = self.callback.borrow_mut().take();
+        if let Some(mut callback) = taken {
+            callback();
+            if self.alive.get() && self.callback.borrow().is_none() {
+                *self.callback.borrow_mut() = Some(callback);
+            }
+        }
+    }
+}
+
+thread_local! {
+    // Indexed by the id `rad_create_timer` hands out.
+    static TIMER_SLOTS: RefCell<Vec<Option<Rc<TimerSlot>>>> = RefCell::new(Vec::new());
+}
+
+/// Called by the JS runtime on every `setInterval` tick of an enabled timer.
+#[unsafe(no_mangle)]
+pub extern "C" fn rad_dispatch_tick(timer_id: u32) {
+    let slot = TIMER_SLOTS.with(|slots| slots.borrow().get(timer_id as usize).cloned().flatten());
+    if let Some(slot) = slot {
+        slot.tick();
+    }
 }
 
 /// Called by the JS runtime when an element with a registered click
@@ -370,6 +413,69 @@ impl PictureBoxHandle for MinPictureBoxHandle {
     fn image_path(&self) -> String { self.0.text() }
 }
 
+struct MinTimerHandle {
+    id: u32,
+    slot: Rc<TimerSlot>,
+    interval_ms: Cell<u32>,
+    enabled: Cell<bool>,
+}
+
+impl MinTimerHandle {
+    fn new() -> Self {
+        let id = unsafe { ffi::rad_create_timer() };
+        let slot = Rc::new(TimerSlot { callback: RefCell::new(None), alive: Cell::new(true) });
+        TIMER_SLOTS.with(|slots| {
+            let mut slots = slots.borrow_mut();
+            if slots.len() <= id as usize {
+                slots.resize(id as usize + 1, None);
+            }
+            slots[id as usize] = Some(slot.clone());
+        });
+        // WinForms defaults: disabled, 100 ms.
+        Self { id, slot, interval_ms: Cell::new(100), enabled: Cell::new(false) }
+    }
+
+    fn apply(&self) {
+        unsafe { ffi::rad_timer_set(self.id, self.interval_ms.get().max(1), self.enabled.get() as u32) };
+    }
+}
+
+impl TimerHandle for MinTimerHandle {
+    fn set_interval(&self, interval_ms: u32) {
+        self.interval_ms.set(interval_ms);
+        if self.enabled.get() {
+            self.apply();
+        }
+    }
+    fn interval(&self) -> u32 {
+        self.interval_ms.get()
+    }
+    fn set_enabled(&self, enabled: bool) {
+        if enabled != self.enabled.get() {
+            self.enabled.set(enabled);
+            self.apply();
+        }
+    }
+    fn enabled(&self) -> bool {
+        self.enabled.get()
+    }
+    fn set_on_tick(&self, callback: Box<dyn FnMut()>) {
+        *self.slot.callback.borrow_mut() = Some(callback);
+    }
+}
+
+impl Drop for MinTimerHandle {
+    fn drop(&mut self) {
+        self.slot.alive.set(false);
+        unsafe { ffi::rad_timer_destroy(self.id) };
+        TIMER_SLOTS.with(|slots| {
+            if let Some(entry) = slots.borrow_mut().get_mut(self.id as usize) {
+                *entry = None;
+            }
+        });
+    }
+}
+
 struct MinTreeViewHandle {
     el: ElementHandle,
     items: RefCell<Vec<TreeItem>>,
@@ -459,6 +565,9 @@ impl Host for WebMinWindow {
             el: create_element(self.id, kind::TREE_VIEW, "", ""),
             items: RefCell::new(Vec::new()),
         })
+    }
+    fn create_timer(&self) -> Box<dyn TimerHandle> {
+        Box::new(MinTimerHandle::new())
     }
 }
 

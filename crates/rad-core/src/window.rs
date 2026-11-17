@@ -110,4 +110,8 @@ impl Host for Window {
     fn create_tree_view(&self) -> Box<dyn crate::TreeViewHandle> {
         self.handle.create_tree_view()
     }
+
+    fn create_timer(&self) -> Box<dyn crate::TimerHandle> {
+        self.handle.create_timer()
+    }
 }

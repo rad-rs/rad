@@ -8,11 +8,12 @@
 
 use rad_core::{
     Backend, ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TreeItem, TreeViewHandle, WidgetHandle,
-    WindowHandle,
+    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeItem, TreeViewHandle,
+    WidgetHandle, WindowHandle,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Once;
 
 mod ffi {
@@ -41,6 +42,7 @@ mod ffi {
     pub const IDI_APPLICATION: *const u16 = 32512usize as *const u16;
     pub const CW_USEDEFAULT: i32 = -2147483648;
     pub const WM_DESTROY: u32 = 0x0002;
+    pub const WM_TIMER: u32 = 0x0113;
     pub const WM_SIZE: u32 = 0x0005;
     pub const WM_SETICON: u32 = 0x0080;
     pub const WM_COMMAND: u32 = 0x0111;
@@ -204,6 +206,10 @@ mod ffi {
         pub fn AdjustWindowRect(rect: *mut Rect, style: u32, menu: i32) -> i32;
         pub fn LoadIconW(instance: HWND, icon_name: *const u16) -> HWND;
         pub fn PostQuitMessage(exit_code: i32);
+        /// `timer_proc` is always null here: ticks arrive as `WM_TIMER` on the
+        /// window's own procedure, which keeps them on the UI thread.
+        pub fn SetTimer(hwnd: HWND, id_event: usize, elapse_ms: u32, timer_proc: *const std::ffi::c_void) -> usize;
+        pub fn KillTimer(hwnd: HWND, id_event: usize) -> i32;
         pub fn GetStockObject(index: i32) -> HWND;
         pub fn InvalidateRect(hwnd: HWND, rect: *const Rect, erase: i32) -> i32;
         pub fn SetProcessDPIAware() -> i32;
@@ -304,6 +310,116 @@ fn fire_click(hwnd: HWND) {
             callback();
         }
     });
+}
+
+/// Everything a tick needs, shared between a `Win32TimerHandle` and the
+/// per-thread table `wndproc` looks it up in (a `WM_TIMER` only carries the
+/// window and the timer id, not any Rust state).
+struct TimerShared {
+    callback: RefCell<Option<Box<dyn FnMut()>>>,
+    /// Cleared when the timer is dropped or its window is destroyed, so a
+    /// tick that is mid-flight at that moment does not put its callback back.
+    alive: Cell<bool>,
+}
+
+thread_local! {
+    static TIMERS: RefCell<HashMap<(usize, usize), Rc<TimerShared>>> = RefCell::new(HashMap::new());
+    static NEXT_TIMER_ID: Cell<usize> = const { Cell::new(1) };
+}
+
+/// Runs one tick. The callback is taken out of its slot while it runs, so it
+/// may freely stop the timer, change its interval, or install a replacement
+/// callback (all of which touch the same slot) without a re-entrancy panic.
+fn fire_timer(hwnd: HWND, id: usize) {
+    let shared = TIMERS.with(|timers| timers.borrow().get(&(hwnd_key(hwnd), id)).cloned());
+    let Some(shared) = shared else { return };
+    let taken = shared.callback.borrow_mut().take();
+    if let Some(mut callback) = taken {
+        callback();
+        // Put the callback back unless the handler replaced it or the timer
+        // was dropped meanwhile.
+        if shared.alive.get() && shared.callback.borrow().is_none() {
+            *shared.callback.borrow_mut() = Some(callback);
+        }
+    }
+}
+
+/// Window teardown: Windows itself discards a destroyed window's timers, so
+/// only our bookkeeping needs clearing.
+fn forget_timers_of(hwnd: HWND) {
+    TIMERS.with(|timers| {
+        timers.borrow_mut().retain(|(owner, _), shared| {
+            let keep = *owner != hwnd_key(hwnd);
+            if !keep {
+                shared.alive.set(false);
+            }
+            keep
+        });
+    });
+}
+
+pub(crate) struct Win32TimerHandle {
+    hwnd: HWND,
+    id: usize,
+    shared: Rc<TimerShared>,
+    interval_ms: Cell<u32>,
+    enabled: Cell<bool>,
+}
+
+impl Win32TimerHandle {
+    fn arm(&self) {
+        // Windows clamps below ~10 ms and above i32::MAX on its own.
+        unsafe { ffi::SetTimer(self.hwnd, self.id, self.interval_ms.get().max(1), std::ptr::null()) };
+    }
+}
+
+impl TimerHandle for Win32TimerHandle {
+    fn set_interval(&self, interval_ms: u32) {
+        self.interval_ms.set(interval_ms);
+        if self.enabled.get() {
+            self.arm(); // SetTimer on an existing id just changes its period
+        }
+    }
+    fn interval(&self) -> u32 {
+        self.interval_ms.get()
+    }
+    fn set_enabled(&self, enabled: bool) {
+        if enabled == self.enabled.get() {
+            return;
+        }
+        self.enabled.set(enabled);
+        if enabled {
+            self.arm();
+        } else {
+            unsafe { ffi::KillTimer(self.hwnd, self.id) };
+        }
+    }
+    fn enabled(&self) -> bool {
+        self.enabled.get()
+    }
+    fn set_on_tick(&self, callback: Box<dyn FnMut()>) {
+        *self.shared.callback.borrow_mut() = Some(callback);
+    }
+}
+
+impl Drop for Win32TimerHandle {
+    fn drop(&mut self) {
+        self.shared.alive.set(false);
+        unsafe { ffi::KillTimer(self.hwnd, self.id) };
+        TIMERS.with(|timers| timers.borrow_mut().remove(&(hwnd_key(self.hwnd), self.id)));
+    }
+}
+
+fn create_timer(parent: HWND) -> Box<dyn TimerHandle> {
+    let id = NEXT_TIMER_ID.with(|next| {
+        let id = next.get();
+        next.set(id + 1);
+        id
+    });
+    let shared = Rc::new(TimerShared { callback: RefCell::new(None), alive: Cell::new(true) });
+    TIMERS.with(|timers| timers.borrow_mut().insert((hwnd_key(parent), id), shared.clone()));
+    // WinForms defaults: disabled, 100 ms.
+    Box::new(Win32TimerHandle { hwnd: parent, id, shared, interval_ms: Cell::new(100), enabled: Cell::new(false) })
 }
 
 #[derive(Clone, Copy)]
@@ -510,6 +626,9 @@ impl Host for Win32Host {
     }
     fn create_tree_view(&self) -> Box<dyn TreeViewHandle> {
         create_tree_view(self.hwnd)
+    }
+    fn create_timer(&self) -> Box<dyn TimerHandle> {
+        create_timer(self.hwnd)
     }
 }
 
@@ -824,7 +943,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: ffi::WPARAM, lpa
                 }
                 0
             }
+            ffi::WM_TIMER => {
+                fire_timer(hwnd, wparam);
+                0
+            }
             ffi::WM_DESTROY => {
+                forget_timers_of(hwnd);
                 ffi::PostQuitMessage(0);
                 0
             }
@@ -987,6 +1111,9 @@ impl Host for Win32Window {
     }
     fn create_tree_view(&self) -> Box<dyn TreeViewHandle> {
         create_tree_view(self.hwnd)
+    }
+    fn create_timer(&self) -> Box<dyn TimerHandle> {
+        create_timer(self.hwnd)
     }
 }
 

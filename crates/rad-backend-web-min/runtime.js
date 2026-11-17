@@ -29,6 +29,9 @@ export async function runApp(wasmBytes, root) {
   const elements = []; // { kind, dom, clickCallbackId, resizeCallbackId }
   let memory; // set once the instance exists; imports below close over it
   let windowCount = 0;
+  // Timer id -> its running `setInterval` handle (or null while stopped).
+  // Timers have no DOM element, so they live outside `elements`.
+  const timers = [];
 
   function newElement(kind, dom) {
     const id = elements.length;
@@ -275,6 +278,23 @@ export async function runApp(wasmBytes, root) {
         row.style.whiteSpace = "nowrap";
         dom.appendChild(row);
       }
+    },
+
+    // Non-visual timer: one `setInterval` per enabled timer, each tick
+    // calling back into the module's exported `rad_dispatch_tick`.
+    rad_create_timer() {
+      timers.push(null);
+      return timers.length - 1;
+    },
+    rad_timer_set(id, intervalMs, enabled) {
+      if (timers[id] !== null) clearInterval(timers[id]);
+      timers[id] = enabled
+        ? setInterval(() => instance.exports.rad_dispatch_tick(id), Math.max(1, intervalMs))
+        : null;
+    },
+    rad_timer_destroy(id) {
+      if (timers[id] !== null) clearInterval(timers[id]);
+      timers[id] = null;
     },
 
     rad_set_fore_color(id, hasColor, r, g, b) {

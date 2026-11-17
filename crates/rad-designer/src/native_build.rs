@@ -23,6 +23,7 @@ const RAD_CORE_PROGRESS_BAR: &str = rad_core_file!("progress_bar.rs");
 const RAD_CORE_TREE_VIEW: &str = rad_core_file!("tree_view.rs");
 const RAD_CORE_RADIO_BUTTON: &str = rad_core_file!("radio_button.rs");
 const RAD_CORE_TEXTBOX: &str = rad_core_file!("textbox.rs");
+const RAD_CORE_TIMER: &str = rad_core_file!("timer.rs");
 const RAD_CORE_WIDGET: &str = rad_core_file!("widget.rs");
 const RAD_CORE_WINDOW: &str = rad_core_file!("window.rs");
 
@@ -47,6 +48,7 @@ pub fn build_native_mount_files(main_rs: &str, form1_rs: &str, form1_designer_rs
     map.set(&"/rad_core/tree_view.rs".into(), &as_rad_core_submodule(RAD_CORE_TREE_VIEW).into());
     map.set(&"/rad_core/radio_button.rs".into(), &as_rad_core_submodule(RAD_CORE_RADIO_BUTTON).into());
     map.set(&"/rad_core/textbox.rs".into(), &as_rad_core_submodule(RAD_CORE_TEXTBOX).into());
+    map.set(&"/rad_core/timer.rs".into(), &as_rad_core_submodule(RAD_CORE_TIMER).into());
     map.set(&"/rad_core/widget.rs".into(), &as_rad_core_submodule(RAD_CORE_WIDGET).into());
     map.set(&"/rad_core/window.rs".into(), &as_rad_core_submodule(RAD_CORE_WINDOW).into());
 

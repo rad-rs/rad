@@ -9,6 +9,7 @@ mod picture_box;
 mod progress_bar;
 mod radio_button;
 mod textbox;
+mod timer;
 mod tree_view;
 mod widget;
 mod window;
@@ -20,6 +21,7 @@ pub use picture_box::{PictureBox, PictureBoxHandle};
 pub use progress_bar::{ProgressBar, ProgressBarHandle};
 pub use radio_button::{RadioButton, RadioButtonHandle};
 pub use textbox::{TextBox, TextBoxHandle};
+pub use timer::{Timer, TimerHandle};
 pub use tree_view::{TreeItem, TreeView, TreeViewHandle};
 pub use widget::{Color, WidgetHandle};
 pub use window::{Backend, Window, WindowHandle};
@@ -46,4 +48,7 @@ pub trait Host {
     fn create_progress_bar(&self) -> Box<dyn ProgressBarHandle>;
     fn create_picture_box(&self) -> Box<dyn PictureBoxHandle>;
     fn create_tree_view(&self) -> Box<dyn TreeViewHandle>;
+    /// Timers are non-visual, so they belong to a host (they need a window
+    /// to deliver ticks on) but never appear in it.
+    fn create_timer(&self) -> Box<dyn TimerHandle>;
 }

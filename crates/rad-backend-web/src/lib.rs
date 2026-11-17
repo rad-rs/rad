@@ -9,9 +9,9 @@ pub use window::{WebBackend, WebWindow};
 
 use rad_core::{
     ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, OsSkin, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TreeViewHandle, WidgetHandle,
+    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeViewHandle, WidgetHandle,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -102,6 +102,10 @@ impl Host for WebHost {
         el.style().set_property("border", "1px solid #adadad").ok();
         el.style().set_property("background", "#fff").ok();
         Box::new(WebTreeViewHandle::new(el))
+    }
+
+    fn create_timer(&self) -> Box<dyn TimerHandle> {
+        Box::new(WebTimerHandle::new())
     }
 }
 
@@ -387,6 +391,119 @@ impl LabelHandle for WebLabelHandle {
 
     fn text(&self) -> String {
         self.el.text_content().unwrap_or_default()
+    }
+}
+
+// --- Timer ---
+
+struct TimerSlot {
+    callback: RefCell<Option<Box<dyn FnMut()>>>,
+    alive: Cell<bool>,
+    in_tick: Cell<bool>,
+}
+
+impl TimerSlot {
+    /// Runs one tick with the callback taken out of its slot, so the handler
+    /// can stop or retune the timer, or replace its own callback, without a
+    /// re-entrancy panic.
+    fn tick(&self) {
+        let taken = self.callback.borrow_mut().take();
+        if let Some(mut callback) = taken {
+            self.in_tick.set(true);
+            callback();
+            self.in_tick.set(false);
+            if self.alive.get() && self.callback.borrow().is_none() {
+                *self.callback.borrow_mut() = Some(callback);
+            }
+        }
+    }
+}
+
+/// A `setInterval` timer. There is no DOM node: the browser's own timer is
+/// the whole implementation. One JS closure lives as long as the handle, so
+/// stopping from inside a tick never drops the closure that is running.
+pub(crate) struct WebTimerHandle {
+    slot: Rc<TimerSlot>,
+    closure: Closure<dyn FnMut()>,
+    interval_ms: Cell<u32>,
+    enabled: Cell<bool>,
+    interval_id: Cell<Option<i32>>,
+}
+
+impl WebTimerHandle {
+    pub(crate) fn new() -> Self {
+        let slot = Rc::new(TimerSlot {
+            callback: RefCell::new(None),
+            alive: Cell::new(true),
+            in_tick: Cell::new(false),
+        });
+        let closure = {
+            let slot = slot.clone();
+            Closure::wrap(Box::new(move || slot.tick()) as Box<dyn FnMut()>)
+        };
+        // WinForms defaults: disabled, 100 ms.
+        Self { slot, closure, interval_ms: Cell::new(100), enabled: Cell::new(false), interval_id: Cell::new(None) }
+    }
+
+    fn clear(&self) {
+        if let (Some(id), Some(window)) = (self.interval_id.take(), web_sys::window()) {
+            window.clear_interval_with_handle(id);
+        }
+    }
+
+    fn arm(&self) {
+        self.clear();
+        if let Some(window) = web_sys::window() {
+            let ms = self.interval_ms.get().clamp(1, i32::MAX as u32) as i32;
+            if let Ok(id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                self.closure.as_ref().unchecked_ref(),
+                ms,
+            ) {
+                self.interval_id.set(Some(id));
+            }
+        }
+    }
+}
+
+impl TimerHandle for WebTimerHandle {
+    fn set_interval(&self, interval_ms: u32) {
+        self.interval_ms.set(interval_ms);
+        if self.enabled.get() {
+            self.arm();
+        }
+    }
+    fn interval(&self) -> u32 {
+        self.interval_ms.get()
+    }
+    fn set_enabled(&self, enabled: bool) {
+        if enabled == self.enabled.get() {
+            return;
+        }
+        self.enabled.set(enabled);
+        if enabled {
+            self.arm();
+        } else {
+            self.clear();
+        }
+    }
+    fn enabled(&self) -> bool {
+        self.enabled.get()
+    }
+    fn set_on_tick(&self, callback: Box<dyn FnMut()>) {
+        *self.slot.callback.borrow_mut() = Some(callback);
+    }
+}
+
+impl Drop for WebTimerHandle {
+    fn drop(&mut self) {
+        self.slot.alive.set(false);
+        self.clear();
+        if self.slot.in_tick.get() {
+            // Dropped from inside its own tick: that JS closure is on the
+            // stack right now, so leak it instead of freeing it.
+            let closure = std::mem::replace(&mut self.closure, Closure::wrap(Box::new(|| {}) as Box<dyn FnMut()>));
+            closure.forget();
+        }
     }
 }
 
