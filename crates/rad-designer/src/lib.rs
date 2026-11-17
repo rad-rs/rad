@@ -407,9 +407,21 @@ impl PlacedKind {
     fn set_items_text(&mut self, text: &str) {
         match self {
             Self::TreeView(c) => c.set_items(&parse_items_text(text)),
-            // One item per line, surrounding spaces ignored.
-            Self::ComboBox(c) => c.set_items(&parse_list_items(text)),
-            Self::ListBox(c) => c.set_items(&parse_list_items(text)),
+            // One item per line, surrounding spaces ignored. Every property
+            // edit re-applies all fields, and setting the items clears the
+            // selection, so leave an unchanged list alone.
+            Self::ComboBox(c) => {
+                let items = parse_list_items(text);
+                if items != c.items() {
+                    c.set_items(&items);
+                }
+            }
+            Self::ListBox(c) => {
+                let items = parse_list_items(text);
+                if items != c.items() {
+                    c.set_items(&items);
+                }
+            }
             _ => {}
         }
     }
@@ -971,14 +983,15 @@ fn apply_properties(
             if c.control.value().is_some() {
                 c.control.set_value(parse_i32(&inputs.value, 0));
             }
-            if c.control.selected_index().is_some() {
-                c.control.set_selected_index(parse_i32(&inputs.selected, -1));
-            }
             if c.control.image_path().is_some() {
                 c.control.set_image_path(&inputs.image_path.value());
             }
             if c.control.items_text().is_some() {
                 c.control.set_items_text(&inputs.items.value());
+            }
+            // After the items: setting those clears the selection.
+            if c.control.selected_index().is_some() {
+                c.control.set_selected_index(parse_i32(&inputs.selected, -1));
             }
             show_selection(control_overlay, c);
             render_chip(c);
@@ -1434,8 +1447,26 @@ pub fn start() {
 
     // Properties panel: any field's "change" re-applies the whole set from
     // the inputs (simpler than tracking which single field fired, and just
-    // as correct since the others are unchanged).
-    for field in [&inputs.text, &inputs.x, &inputs.y, &inputs.width, &inputs.height, &inputs.checked, &inputs.interval, &inputs.minimum, &inputs.maximum, &inputs.selected] {
+    // as correct since the others are unchanged). Every field must be listed
+    // here: one that is missing only takes effect when some other field
+    // happens to change afterwards (Value, Image path and Items used to be
+    // left out, so editing only those did nothing).
+    let fields: [&web_sys::EventTarget; 13] = [
+        &inputs.text,
+        &inputs.x,
+        &inputs.y,
+        &inputs.width,
+        &inputs.height,
+        &inputs.checked,
+        &inputs.interval,
+        &inputs.minimum,
+        &inputs.maximum,
+        &inputs.selected,
+        &inputs.value,
+        &inputs.image_path,
+        &inputs.items,
+    ];
+    for field in fields {
         let on_change = {
             let window = window.clone();
             let controls = controls.clone();
