@@ -8,9 +8,10 @@ A rapid-application-development (RAD) framework and visual designer for Rust: dr
 |---|---|
 | `rad-core` | Widget model and the `Backend` trait. See [Components](#components). |
 | `rad-backend-win32` | Native Win32 backend. No external dependencies (hand-declared WinAPI), so the same source builds with Cargo and as plain mounted source in the designer's in-browser pipeline. |
+| `rad-backend-gtk` | Native Linux backend on GTK 3. Same shape as the Win32 one: no crate dependencies (hand-declared FFI to `libgtk-3`, in `rad-core/src/platform/gtk.rs`), so it also works as plain mounted source. See [Linux](#linux-gtk-3). |
 | `rad-backend-web` | Browser backend built on `wasm-bindgen`/`web-sys`. Used by the designer itself. |
 | `rad-backend-web-min` | Browser backend with no `wasm-bindgen`, driven by a small JS shim (`runtime.js`). Used for apps compiled by the in-browser pipeline. |
-| `rad-demo`, `rad-demo-native` | A form built on the browser backend, and one built on the Win32 backend. |
+| `rad-demo`, `rad-demo-native`, `rad-demo-linux` | The all-controls form built on the browser backend, on the Win32 backend and on the GTK backend. |
 | `rad-designer` | The visual designer (runs in the browser, built with `trunk`). |
 
 ## Components
@@ -25,7 +26,7 @@ A rapid-application-development (RAD) framework and visual designer for Rust: dr
 
 `TrackBar`, `ComboBox` and `ListBox` raise `set_on_change`, fired when the user changes them (not when code does). A `Timer` has no place on the form: in the designer it appears as a chip in a component tray below the form, and double-clicking it stubs out its `tick` handler.
 
-All of them are implemented for every platform (Win32, web, web-min) and are available in the designer's toolbox.
+All of them are implemented for every platform (Win32, GTK, web, web-min) and are available in the designer's toolbox.
 
 ### Adding a component
 
@@ -34,9 +35,9 @@ A component is **one file** in `crates/rad-core/src/components/`; nothing else i
 - the model: a `<Name>Handle` trait, the `<Name>` wrapper (`new(host, ...)` calls `imp::create(&host.parent(), ...)`) and `impl_widget_common!`;
 - `pub(crate) const INFO: ComponentInfo`: toolbox name, category, icon and order, default size, constructor arguments, properties (name, type, default), events, and a declarative `Preview` (tag, attributes, CSS) that both browser platforms build their DOM from;
 - `impl Designable`: `get`/`set` by property name, which is how the designer edits it and writes `form1.designer.rs`;
-- one `mod imp` per platform, gated by `#[cfg(rad_win32)]`, `#[cfg(rad_web)]` or `#[cfg(rad_web_min)]` (a macOS one would be `rad_macos`), using the helpers in `rad-core/src/platform/`.
+- one `mod imp` per platform, gated by `#[cfg(rad_win32)]`, `#[cfg(rad_gtk)]`, `#[cfg(rad_web)]` or `#[cfg(rad_web_min)]` (a macOS one would be `rad_macos`), using the helpers in `rad-core/src/platform/`.
 
-The file name is the module name; its top-level `pub` items are re-exported from `rad_core`. `rad-core`'s `build.rs` finds the files and generates the module list and the `COMPONENTS` registry; the designer's `build.rs` does the same scan to mount them in the in-browser builds and fill the toolbox. Backends only create windows and run the message loop. The platform is chosen by `build.rs` from the target and the `web`/`web-min` features; the in-browser pipelines pass `--cfg rad_web_min` / `--cfg rad_win32` to rustc.
+The file name is the module name; its top-level `pub` items are re-exported from `rad_core`. `rad-core`'s `build.rs` finds the files and generates the module list and the `COMPONENTS` registry; the designer's `build.rs` does the same scan to mount them in the in-browser builds and fill the toolbox. Backends only create windows and run the message loop. The platform is chosen by `build.rs` from the target (Windows: `rad_win32`, Linux: `rad_gtk`) and the `web`/`web-min` features; the in-browser pipelines pass `--cfg rad_web_min` / `--cfg rad_win32` to rustc.
 
 In the designer, drag a control from the toolbox onto the form, click it to select it, double-click it for its event handler, and press **Delete** to remove the selected control or timer. `form1.designer.rs` is regenerated, so the removal is immediate there. A handler stub already written into `form1.rs` is yours and is left alone: the designer warns that `form1.rs` still refers to the removed control, and a build fails with the compile error until you delete that stub. A new control never reuses the name of one that `form1.rs` still refers to.
 
@@ -44,10 +45,36 @@ In the designer, drag a control from the toolbox onto the form, click it to sele
 
 ```
 cargo build -p rad-demo-native        # native Windows demo
+cargo build -p rad-demo-linux         # native Linux demo (needs libgtk-3-dev)
 cd crates/rad-designer && trunk serve # designer, http://127.0.0.1:8080
 ```
 
 The designer needs cross-origin isolation (it registers `coi-serviceworker.js`) because the in-browser compiler uses threads.
+
+## Linux (GTK 3)
+
+`rad-backend-gtk` and `rad-demo-linux` build only on Linux (on other OSes they are empty, so a workspace build there is unaffected), and need the GTK 3 development files:
+
+```
+sudo apt install libgtk-3-dev          # Debian/Ubuntu; also pkg-config and a C linker
+cargo build -p rad-demo-linux
+cargo run -p rad-demo-linux
+```
+
+There are no crate dependencies: `rad-core/src/platform/gtk.rs` declares the handful of GTK/GObject/GLib functions it needs and links `libgtk-3`, `libgobject-2.0`, `libglib-2.0` and `libgdk_pixbuf-2.0`. Under WSL2 with WSLg it opens as a normal window.
+
+| Component | GTK widget |
+|---|---|
+| Button, CheckBox, RadioButton, TextBox | `GtkButton`, `GtkCheckButton`, `GtkRadioButton` (grouped by group name per form), `GtkEntry` |
+| Label, PictureBox | `GtkLabel` / `GtkImage` inside a `GtkEventBox`, which gives them clicks and a back colour (`GtkImage` loads whatever gdk-pixbuf can: PNG, JPEG, BMP...) |
+| ProgressBar, TrackBar | `GtkProgressBar`, `GtkScale` (about ten tick marks across the range) |
+| ComboBox, ListBox | `GtkComboBoxText`, `GtkListBox` in a scrolled window |
+| TreeView | `GtkTreeView` over a `GtkTreeStore`, expanded |
+| Timer | `g_timeout_add` source; disabled until enabled, 100 ms by default |
+
+Controls sit on a `GtkFixed` for absolute positions, and colours are applied with a per-widget CSS provider. As on Win32, `set_on_change` handlers fire only for user changes, never for changes made by code. `TextBox::set_on_click` fires on Enter (a `GtkEntry` consumes mouse presses).
+
+Not supported: in-browser Linux builds. The designer's **Target** selector has no Linux entry, and compiling a form to a Linux binary in the browser is out of scope (it would need a Linux std, a GTK link line and an ELF linker in the wasm toolchain). The designer's toolbox and generated code are unaffected: build the generated sources with Cargo on Linux.
 
 ## In-browser builds
 
