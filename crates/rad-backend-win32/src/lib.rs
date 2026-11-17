@@ -96,6 +96,7 @@ mod ffi {
     pub const TBM_SETPOS: u32 = 0x0405;
     pub const TBM_SETRANGEMIN: u32 = 0x0407;
     pub const TBM_SETRANGEMAX: u32 = 0x0408;
+    pub const TBM_SETTICFREQ: u32 = 0x0414;
 
     // Drop-down list (`COMBOBOX` with `CBS_DROPDOWNLIST`) and list box.
     pub const CBS_DROPDOWNLIST: u32 = 0x0003;
@@ -239,6 +240,8 @@ mod ffi {
         pub fn SetTimer(hwnd: HWND, id_event: usize, elapse_ms: u32, timer_proc: *const std::ffi::c_void) -> usize;
         pub fn KillTimer(hwnd: HWND, id_event: usize) -> i32;
         pub fn GetStockObject(index: i32) -> HWND;
+        /// A shared system-colour brush (never freed); `COLOR_BTNFACE` is the form's own background.
+        pub fn GetSysColorBrush(index: i32) -> HWND;
         pub fn InvalidateRect(hwnd: HWND, rect: *const Rect, erase: i32) -> i32;
         pub fn SetProcessDPIAware() -> i32;
         pub fn GetDpiForSystem() -> u32;
@@ -489,6 +492,11 @@ thread_local! {
     // any Rust-side state attached to it, so this is the only way to
     // get a color back out when painting.
     static COLOR_STATE: RefCell<HashMap<usize, ColorState>> = RefCell::new(HashMap::new());
+    // Trackbars ask their parent for a background brush with `WM_CTLCOLORSTATIC`
+    // and paint nothing themselves, so answering with the "transparent"
+    // `NULL_BRUSH` every other control gets would leave their old pixels on
+    // screen: a black backdrop and a ghost of every earlier thumb position.
+    static TRACKBARS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
     // One cached brush per distinct back color ever used — recreating
     // on every paint would leak just as much (brushes are never freed
     // here either way) while also being slower.
@@ -547,6 +555,10 @@ fn handle_ctlcolor(hdc: HWND, child: HWND, default_to_transparent: bool) -> ffi:
                 ffi::SetBkMode(hdc, ffi::OPAQUE);
                 ffi::SetBkColor(hdc, color_ref(color));
                 brush_for(color) as ffi::LRESULT
+            }
+            None if default_to_transparent && TRACKBARS.with(|t| t.borrow().contains(&hwnd_key(child))) => {
+                // Erase to the form's own colour, as the window class does.
+                ffi::GetSysColorBrush(ffi::COLOR_BTNFACE as i32) as ffi::LRESULT
             }
             None if default_to_transparent => {
                 ffi::SetBkMode(hdc, ffi::TRANSPARENT);
@@ -806,11 +818,14 @@ impl ProgressBarHandle for Win32ProgressBarHandle {
 fn create_track_bar(parent: HWND) -> Box<dyn TrackBarHandle> {
     init_common_controls_once();
     let hwnd = create_child(parent, "msctls_trackbar32", ffi::TBS_AUTOTICKS, "");
+    TRACKBARS.with(|t| t.borrow_mut().insert(hwnd_key(hwnd)));
     unsafe {
         ffi::SendMessageW(hwnd, ffi::TBM_SETRANGEMIN, 1, 0);
         ffi::SendMessageW(hwnd, ffi::TBM_SETRANGEMAX, 1, 100);
     }
-    Box::new(Win32TrackBarHandle { base: Win32Widget::new(hwnd) })
+    let handle = Win32TrackBarHandle { base: Win32Widget::new(hwnd) };
+    handle.update_ticks();
+    Box::new(handle)
 }
 
 fn create_combo_box(parent: HWND) -> Box<dyn ComboBoxHandle> {
@@ -831,15 +846,31 @@ fn create_list_box(parent: HWND) -> Box<dyn ListBoxHandle> {
 
 pub(crate) struct Win32TrackBarHandle { base: Win32Widget }
 impl_widget_handle!(Win32TrackBarHandle, base);
+impl Win32TrackBarHandle {
+    /// `TBS_AUTOTICKS` draws a tick for every unit by default, which for a range
+    /// like 100..1500 merges into one solid bar. Space them about ten across the
+    /// range instead (never closer than one unit).
+    fn update_ticks(&self) {
+        unsafe {
+            let min = ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMIN, 0, 0) as i64;
+            let max = ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMAX, 0, 0) as i64;
+            let freq = ((max - min) / 10).max(1);
+            ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETTICFREQ, freq as usize, 0);
+        }
+    }
+}
+
 impl TrackBarHandle for Win32TrackBarHandle {
     fn set_minimum(&self, minimum: i32) {
         unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETRANGEMIN, 1, minimum as isize) };
+        self.update_ticks();
     }
     fn minimum(&self) -> i32 {
         unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMIN, 0, 0) as i32 }
     }
     fn set_maximum(&self, maximum: i32) {
         unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETRANGEMAX, 1, maximum as isize) };
+        self.update_ticks();
     }
     fn maximum(&self) -> i32 {
         unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMAX, 0, 0) as i32 }
