@@ -20,9 +20,9 @@
 //! exists for code compiled through the no-wasm-bindgen pipeline.
 
 use rad_core::{
-    Backend, ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeItem, TreeViewHandle,
-    WidgetHandle, WindowHandle,
+    Backend, ButtonHandle, CheckBoxHandle, Color, ComboBoxHandle, Host, LabelHandle, ListBoxHandle,
+    PictureBoxHandle, ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle,
+    TrackBarHandle, TreeItem, TreeViewHandle, WidgetHandle, WindowHandle,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -79,6 +79,21 @@ mod ffi {
         /// otherwise stops it. Ticks come back through `rad_dispatch_tick`.
         pub fn rad_timer_set(id: u32, interval_ms: u32, enabled: u32);
         pub fn rad_timer_destroy(id: u32);
+
+        /// A signed value, unlike `rad_set_value`: a trackbar's range can be
+        /// negative.
+        pub fn rad_set_int_value(id: u32, value: i32);
+        pub fn rad_get_int_value(id: u32) -> i32;
+        pub fn rad_set_range(id: u32, minimum: i32, maximum: i32);
+
+        /// Items cross as one `(ptr, len)` string, one item per line.
+        pub fn rad_set_list_items(id: u32, ptr: *const u8, len: u32);
+        /// `-1` means no selection.
+        pub fn rad_set_selected_index(id: u32, index: i32);
+        pub fn rad_get_selected_index(id: u32) -> i32;
+        /// Fires `rad_dispatch_change` when the user moves a trackbar or picks
+        /// a different list item.
+        pub fn rad_register_change(id: u32, callback_id: u32);
     }
 }
 
@@ -92,9 +107,13 @@ mod kind {
     pub const PROGRESS_BAR: u32 = 5;
     pub const PICTURE_BOX: u32 = 6;
     pub const TREE_VIEW: u32 = 7;
+    pub const TRACK_BAR: u32 = 8;
+    pub const COMBO_BOX: u32 = 9;
+    pub const LIST_BOX: u32 = 10;
 }
 
 thread_local! {
+    static CHANGE_CALLBACKS: RefCell<Vec<Option<Box<dyn FnMut()>>>> = RefCell::new(Vec::new());
     static CLICK_CALLBACKS: RefCell<Vec<Option<Box<dyn FnMut()>>>> = RefCell::new(Vec::new());
     static RESIZE_CALLBACKS: RefCell<Vec<Option<Box<dyn FnMut(u32, u32)>>>> = RefCell::new(Vec::new());
 }
@@ -146,6 +165,32 @@ pub extern "C" fn rad_dispatch_tick(timer_id: u32) {
     let slot = TIMER_SLOTS.with(|slots| slots.borrow().get(timer_id as usize).cloned().flatten());
     if let Some(slot) = slot {
         slot.tick();
+    }
+}
+
+fn store_change_callback(callback: Box<dyn FnMut()>) -> u32 {
+    CHANGE_CALLBACKS.with(|cell| {
+        let mut callbacks = cell.borrow_mut();
+        callbacks.push(Some(callback));
+        (callbacks.len() - 1) as u32
+    })
+}
+
+/// Called by the JS runtime when the user moves a trackbar or picks a
+/// different item in a combo or list box. The callback is taken out while it
+/// runs, so it may register further handlers.
+#[unsafe(no_mangle)]
+pub extern "C" fn rad_dispatch_change(callback_id: u32) {
+    let taken = CHANGE_CALLBACKS.with(|cell| cell.borrow_mut().get_mut(callback_id as usize).and_then(Option::take));
+    if let Some(mut callback) = taken {
+        callback();
+        CHANGE_CALLBACKS.with(|cell| {
+            if let Some(slot) = cell.borrow_mut().get_mut(callback_id as usize) {
+                if slot.is_none() {
+                    *slot = Some(callback);
+                }
+            }
+        });
     }
 }
 
@@ -413,6 +458,106 @@ impl PictureBoxHandle for MinPictureBoxHandle {
     fn image_path(&self) -> String { self.0.text() }
 }
 
+/// `WidgetHandle` for a wrapper `$ty` holding an `ElementHandle` in `$field`:
+/// every call is forwarded to it.
+macro_rules! impl_min_widget {
+    ($ty:ty, $field:ident) => {
+        impl WidgetHandle for $ty {
+            fn set_pos(&self, x: i32, y: i32) { self.$field.set_pos(x, y) }
+            fn pos(&self) -> (i32, i32) { self.$field.pos() }
+            fn set_width(&self, w: u32) { self.$field.set_width(w) }
+            fn width(&self) -> u32 { self.$field.width() }
+            fn set_height(&self, h: u32) { self.$field.set_height(h) }
+            fn height(&self) -> u32 { self.$field.height() }
+            fn set_on_click(&self, callback: Box<dyn FnMut()>) { self.$field.set_on_click(callback) }
+            fn set_fore_color(&self, color: Option<Color>) { self.$field.set_fore_color(color) }
+            fn fore_color(&self) -> Option<Color> { self.$field.fore_color() }
+            fn set_back_color(&self, color: Option<Color>) { self.$field.set_back_color(color) }
+            fn back_color(&self) -> Option<Color> { self.$field.back_color() }
+        }
+    };
+}
+
+fn register_change(id: u32, callback: Box<dyn FnMut()>) {
+    let callback_id = store_change_callback(callback);
+    unsafe { ffi::rad_register_change(id, callback_id) };
+}
+
+struct MinTrackBarHandle {
+    el: ElementHandle,
+    minimum: Cell<i32>,
+    maximum: Cell<i32>,
+}
+impl_min_widget!(MinTrackBarHandle, el);
+impl TrackBarHandle for MinTrackBarHandle {
+    fn set_minimum(&self, minimum: i32) {
+        self.minimum.set(minimum);
+        unsafe { ffi::rad_set_range(self.el.id, minimum, self.maximum.get()) };
+    }
+    fn minimum(&self) -> i32 {
+        self.minimum.get()
+    }
+    fn set_maximum(&self, maximum: i32) {
+        self.maximum.set(maximum);
+        unsafe { ffi::rad_set_range(self.el.id, self.minimum.get(), maximum) };
+    }
+    fn maximum(&self) -> i32 {
+        self.maximum.get()
+    }
+    fn set_value(&self, value: i32) {
+        unsafe { ffi::rad_set_int_value(self.el.id, value) };
+    }
+    fn value(&self) -> i32 {
+        unsafe { ffi::rad_get_int_value(self.el.id) }
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        register_change(self.el.id, callback);
+    }
+}
+
+/// Backs both `ComboBox` and `ListBox`: a `<select>` on the JS side either way.
+struct MinSelectHandle {
+    el: ElementHandle,
+    items: RefCell<Vec<String>>,
+}
+impl_min_widget!(MinSelectHandle, el);
+
+impl MinSelectHandle {
+    fn fill(&self, items: &[String]) {
+        *self.items.borrow_mut() = items.to_vec();
+        let joined = items.join("\n");
+        unsafe { ffi::rad_set_list_items(self.el.id, joined.as_ptr(), joined.len() as u32) };
+    }
+    fn set_index(&self, index: Option<usize>) {
+        let len = self.items.borrow().len();
+        let value = match index {
+            Some(i) if i < len => i as i32,
+            _ => -1,
+        };
+        unsafe { ffi::rad_set_selected_index(self.el.id, value) };
+    }
+    fn index(&self) -> Option<usize> {
+        let i = unsafe { ffi::rad_get_selected_index(self.el.id) };
+        if i < 0 { None } else { Some(i as usize) }
+    }
+}
+
+impl ComboBoxHandle for MinSelectHandle {
+    fn set_items(&self, items: &[String]) { self.fill(items) }
+    fn items(&self) -> Vec<String> { self.items.borrow().clone() }
+    fn set_selected_index(&self, index: Option<usize>) { self.set_index(index) }
+    fn selected_index(&self) -> Option<usize> { self.index() }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) { register_change(self.el.id, callback) }
+}
+
+impl ListBoxHandle for MinSelectHandle {
+    fn set_items(&self, items: &[String]) { self.fill(items) }
+    fn items(&self) -> Vec<String> { self.items.borrow().clone() }
+    fn set_selected_index(&self, index: Option<usize>) { self.set_index(index) }
+    fn selected_index(&self) -> Option<usize> { self.index() }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) { register_change(self.el.id, callback) }
+}
+
 struct MinTimerHandle {
     id: u32,
     slot: Rc<TimerSlot>,
@@ -568,6 +713,25 @@ impl Host for WebMinWindow {
     }
     fn create_timer(&self) -> Box<dyn TimerHandle> {
         Box::new(MinTimerHandle::new())
+    }
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
+        Box::new(MinTrackBarHandle {
+            el: create_element(self.id, kind::TRACK_BAR, "", ""),
+            minimum: Cell::new(0),
+            maximum: Cell::new(100),
+        })
+    }
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
+        Box::new(MinSelectHandle {
+            el: create_element(self.id, kind::COMBO_BOX, "", ""),
+            items: RefCell::new(Vec::new()),
+        })
+    }
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
+        Box::new(MinSelectHandle {
+            el: create_element(self.id, kind::LIST_BOX, "", ""),
+            items: RefCell::new(Vec::new()),
+        })
     }
 }
 

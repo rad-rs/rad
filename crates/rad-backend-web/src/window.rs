@@ -3,8 +3,9 @@ use crate::{
     WebProgressBarHandle, WebRadioButtonHandle, WebTextBoxHandle, WebTreeViewHandle,
 };
 use rad_core::{
-    Backend, ButtonHandle, CheckBoxHandle, Host, LabelHandle, PictureBoxHandle, ProgressBarHandle,
-    RadioButtonHandle, TextBoxHandle, TimerHandle, TreeViewHandle, WindowHandle,
+    Backend, ButtonHandle, CheckBoxHandle, ComboBoxHandle, Host, LabelHandle, ListBoxHandle,
+    PictureBoxHandle, ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle,
+    TrackBarHandle, TreeViewHandle, WindowHandle,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -271,5 +272,23 @@ impl Host for WebWindow {
 
     fn create_timer(&self) -> Box<dyn TimerHandle> {
         Box::new(crate::WebTimerHandle::new())
+    }
+
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::new_track_bar_element(&document, &self.body);
+        Box::new(crate::WebTrackBarHandle::new_draggable(el))
+    }
+
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::create_element(&document, &self.body, "select");
+        Box::new(crate::WebSelectHandle::new_draggable(el))
+    }
+
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
+        let document = self.body.owner_document().expect("body has a document");
+        let el = crate::new_list_box_element(&document, &self.body);
+        Box::new(crate::WebSelectHandle::new_draggable(el))
     }
 }

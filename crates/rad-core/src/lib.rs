@@ -4,24 +4,30 @@
 
 mod button;
 mod checkbox;
+mod combo_box;
 mod label;
+mod list_box;
 mod picture_box;
 mod progress_bar;
 mod radio_button;
 mod textbox;
 mod timer;
+mod track_bar;
 mod tree_view;
 mod widget;
 mod window;
 
 pub use button::{Button, ButtonHandle};
 pub use checkbox::{CheckBox, CheckBoxHandle};
+pub use combo_box::{ComboBox, ComboBoxHandle};
 pub use label::{Label, LabelHandle};
+pub use list_box::{ListBox, ListBoxHandle};
 pub use picture_box::{PictureBox, PictureBoxHandle};
 pub use progress_bar::{ProgressBar, ProgressBarHandle};
 pub use radio_button::{RadioButton, RadioButtonHandle};
 pub use textbox::{TextBox, TextBoxHandle};
 pub use timer::{Timer, TimerHandle};
+pub use track_bar::{TrackBar, TrackBarHandle};
 pub use tree_view::{TreeItem, TreeView, TreeViewHandle};
 pub use widget::{Color, WidgetHandle};
 pub use window::{Backend, Window, WindowHandle};
@@ -51,4 +57,7 @@ pub trait Host {
     /// Timers are non-visual, so they belong to a host (they need a window
     /// to deliver ticks on) but never appear in it.
     fn create_timer(&self) -> Box<dyn TimerHandle>;
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle>;
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle>;
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle>;
 }

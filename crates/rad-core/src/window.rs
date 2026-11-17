@@ -114,4 +114,16 @@ impl Host for Window {
     fn create_timer(&self) -> Box<dyn crate::TimerHandle> {
         self.handle.create_timer()
     }
+
+    fn create_track_bar(&self) -> Box<dyn crate::TrackBarHandle> {
+        self.handle.create_track_bar()
+    }
+
+    fn create_combo_box(&self) -> Box<dyn crate::ComboBoxHandle> {
+        self.handle.create_combo_box()
+    }
+
+    fn create_list_box(&self) -> Box<dyn crate::ListBoxHandle> {
+        self.handle.create_list_box()
+    }
 }

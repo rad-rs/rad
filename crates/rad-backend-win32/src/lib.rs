@@ -7,12 +7,12 @@
 //! has no way to fetch crates or produce `.rlib`s.
 
 use rad_core::{
-    Backend, ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeItem, TreeViewHandle,
-    WidgetHandle, WindowHandle,
+    Backend, ButtonHandle, CheckBoxHandle, ComboBoxHandle, Color, Host, LabelHandle, ListBoxHandle,
+    PictureBoxHandle, ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle,
+    TrackBarHandle, TreeItem, TreeViewHandle, WidgetHandle, WindowHandle,
 };
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Once;
 
@@ -43,6 +43,7 @@ mod ffi {
     pub const CW_USEDEFAULT: i32 = -2147483648;
     pub const WM_DESTROY: u32 = 0x0002;
     pub const WM_TIMER: u32 = 0x0113;
+    pub const WM_HSCROLL: u32 = 0x0114;
     pub const WM_SIZE: u32 = 0x0005;
     pub const WM_SETICON: u32 = 0x0080;
     pub const WM_COMMAND: u32 = 0x0111;
@@ -83,6 +84,33 @@ mod ffi {
 
     pub const ICC_TREEVIEW_CLASSES: u32 = 0x0000_0002;
     pub const ICC_PROGRESS_CLASS: u32 = 0x0000_0020;
+    pub const ICC_BAR_CLASSES: u32 = 0x0000_0004;
+
+    pub const WS_VSCROLL: u32 = 0x0020_0000;
+
+    // Trackbar (`msctls_trackbar32`): messages are WM_USER (0x0400) + n.
+    pub const TBS_AUTOTICKS: u32 = 0x0001;
+    pub const TBM_GETPOS: u32 = 0x0400;
+    pub const TBM_GETRANGEMIN: u32 = 0x0401;
+    pub const TBM_GETRANGEMAX: u32 = 0x0402;
+    pub const TBM_SETPOS: u32 = 0x0405;
+    pub const TBM_SETRANGEMIN: u32 = 0x0407;
+    pub const TBM_SETRANGEMAX: u32 = 0x0408;
+
+    // Drop-down list (`COMBOBOX` with `CBS_DROPDOWNLIST`) and list box.
+    pub const CBS_DROPDOWNLIST: u32 = 0x0003;
+    pub const CB_GETCURSEL: u32 = 0x0147;
+    pub const CB_ADDSTRING: u32 = 0x0143;
+    pub const CB_RESETCONTENT: u32 = 0x014B;
+    pub const CB_SETCURSEL: u32 = 0x014E;
+    pub const LBS_NOTIFY: u32 = 0x0001;
+    pub const LB_ADDSTRING: u32 = 0x0180;
+    pub const LB_RESETCONTENT: u32 = 0x0184;
+    pub const LB_SETCURSEL: u32 = 0x0186;
+    pub const LB_GETCURSEL: u32 = 0x0188;
+    /// The notification code in `WM_COMMAND`'s high word when the selection
+    /// of a combo box (`CBN_SELCHANGE`) or list box (`LBN_SELCHANGE`) changed.
+    pub const SELCHANGE: usize = 1;
 
     #[repr(C)]
     pub struct InitCommonControlsExStruct {
@@ -312,6 +340,33 @@ fn fire_click(hwnd: HWND) {
     });
 }
 
+thread_local! {
+    static CHANGE_HANDLERS: RefCell<HashMap<usize, Box<dyn FnMut()>>> = RefCell::new(HashMap::new());
+    /// Combo and list boxes: their `WM_COMMAND`s carry a notification code in
+    /// the high word, and only the selection-changed one (1) is a user action
+    /// (the others are focus and drop-down bookkeeping).
+    static SELECTION_CONTROLS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+}
+
+fn set_change_handler(hwnd: HWND, callback: Box<dyn FnMut()>) {
+    CHANGE_HANDLERS.with(|handlers| {
+        handlers.borrow_mut().insert(hwnd_key(hwnd), callback);
+    });
+}
+
+/// Runs a change handler with it taken out of the table while it runs, so
+/// the handler may itself install a new one without a re-entrancy panic.
+fn fire_change(hwnd: HWND) {
+    let key = hwnd_key(hwnd);
+    let taken = CHANGE_HANDLERS.with(|handlers| handlers.borrow_mut().remove(&key));
+    if let Some(mut callback) = taken {
+        callback();
+        CHANGE_HANDLERS.with(|handlers| {
+            handlers.borrow_mut().entry(key).or_insert(callback);
+        });
+    }
+}
+
 /// Everything a tick needs, shared between a `Win32TimerHandle` and the
 /// per-thread table `wndproc` looks it up in (a `WM_TIMER` only carries the
 /// window and the timer id, not any Rust state).
@@ -508,11 +563,22 @@ pub(crate) struct Win32Widget {
     y: Cell<i32>,
     width: Cell<u32>,
     height: Cell<u32>,
+    /// Added to `height` when sizing the window. A combo box's window height
+    /// includes the drop-down list, not just the closed box, so it needs room
+    /// beyond the height the form lays out.
+    extra_height: Cell<u32>,
 }
 
 impl Win32Widget {
     fn new(hwnd: HWND) -> Self {
-        Self { hwnd, x: Cell::new(0), y: Cell::new(0), width: Cell::new(80), height: Cell::new(24) }
+        Self {
+            hwnd,
+            x: Cell::new(0),
+            y: Cell::new(0),
+            width: Cell::new(80),
+            height: Cell::new(24),
+            extra_height: Cell::new(0),
+        }
     }
 
     fn apply_rect(&self) {
@@ -530,7 +596,7 @@ impl Win32Widget {
                 (self.x.get() as f64 * scale).round() as i32,
                 (self.y.get() as f64 * scale).round() as i32,
                 (self.width.get() as f64 * scale).round() as i32,
-                (self.height.get() as f64 * scale).round() as i32,
+                ((self.height.get() + self.extra_height.get()) as f64 * scale).round() as i32,
                 ffi::SWP_NOZORDER,
             );
         }
@@ -630,6 +696,15 @@ impl Host for Win32Host {
     fn create_timer(&self) -> Box<dyn TimerHandle> {
         create_timer(self.hwnd)
     }
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
+        create_track_bar(self.hwnd)
+    }
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
+        create_combo_box(self.hwnd)
+    }
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
+        create_list_box(self.hwnd)
+    }
 }
 
 fn create_button(parent: HWND, text: &str) -> Box<dyn ButtonHandle> {
@@ -728,6 +803,127 @@ impl ProgressBarHandle for Win32ProgressBarHandle {
     }
 }
 
+fn create_track_bar(parent: HWND) -> Box<dyn TrackBarHandle> {
+    init_common_controls_once();
+    let hwnd = create_child(parent, "msctls_trackbar32", ffi::TBS_AUTOTICKS, "");
+    unsafe {
+        ffi::SendMessageW(hwnd, ffi::TBM_SETRANGEMIN, 1, 0);
+        ffi::SendMessageW(hwnd, ffi::TBM_SETRANGEMAX, 1, 100);
+    }
+    Box::new(Win32TrackBarHandle { base: Win32Widget::new(hwnd) })
+}
+
+fn create_combo_box(parent: HWND) -> Box<dyn ComboBoxHandle> {
+    let hwnd = create_child(parent, "COMBOBOX", ffi::CBS_DROPDOWNLIST | ffi::WS_VSCROLL, "");
+    SELECTION_CONTROLS.with(|set| set.borrow_mut().insert(hwnd_key(hwnd)));
+    let base = Win32Widget::new(hwnd);
+    // Room for the drop-down list under the closed box.
+    base.extra_height.set(150);
+    base.apply_rect();
+    Box::new(Win32ComboBoxHandle { base, items: RefCell::new(Vec::new()) })
+}
+
+fn create_list_box(parent: HWND) -> Box<dyn ListBoxHandle> {
+    let hwnd = create_child(parent, "LISTBOX", ffi::LBS_NOTIFY | ffi::WS_VSCROLL | ffi::WS_BORDER, "");
+    SELECTION_CONTROLS.with(|set| set.borrow_mut().insert(hwnd_key(hwnd)));
+    Box::new(Win32ListBoxHandle { base: Win32Widget::new(hwnd), items: RefCell::new(Vec::new()) })
+}
+
+pub(crate) struct Win32TrackBarHandle { base: Win32Widget }
+impl_widget_handle!(Win32TrackBarHandle, base);
+impl TrackBarHandle for Win32TrackBarHandle {
+    fn set_minimum(&self, minimum: i32) {
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETRANGEMIN, 1, minimum as isize) };
+    }
+    fn minimum(&self) -> i32 {
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMIN, 0, 0) as i32 }
+    }
+    fn set_maximum(&self, maximum: i32) {
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETRANGEMAX, 1, maximum as isize) };
+    }
+    fn maximum(&self) -> i32 {
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETRANGEMAX, 0, 0) as i32 }
+    }
+    fn set_value(&self, value: i32) {
+        // The control clamps to its range itself.
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_SETPOS, 1, value as isize) };
+    }
+    fn value(&self) -> i32 {
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::TBM_GETPOS, 0, 0) as i32 }
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        set_change_handler(self.base.hwnd, callback);
+    }
+}
+
+/// `CB_SETCURSEL`/`LB_SETCURSEL` take -1 (as a `WPARAM`) for "no selection".
+fn selection_wparam(index: Option<usize>, len: usize) -> usize {
+    match index {
+        Some(i) if i < len => i,
+        _ => usize::MAX,
+    }
+}
+
+fn selection_from(result: isize) -> Option<usize> {
+    if result < 0 { None } else { Some(result as usize) }
+}
+
+pub(crate) struct Win32ComboBoxHandle { base: Win32Widget, items: RefCell<Vec<String>> }
+impl_widget_handle!(Win32ComboBoxHandle, base);
+impl ComboBoxHandle for Win32ComboBoxHandle {
+    fn set_items(&self, items: &[String]) {
+        *self.items.borrow_mut() = items.to_vec();
+        unsafe {
+            ffi::SendMessageW(self.base.hwnd, ffi::CB_RESETCONTENT, 0, 0);
+            for item in items {
+                let wide = to_wide(item);
+                ffi::SendMessageW(self.base.hwnd, ffi::CB_ADDSTRING, 0, wide.as_ptr() as isize);
+            }
+        }
+    }
+    fn items(&self) -> Vec<String> {
+        self.items.borrow().clone()
+    }
+    fn set_selected_index(&self, index: Option<usize>) {
+        let wparam = selection_wparam(index, self.items.borrow().len());
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::CB_SETCURSEL, wparam, 0) };
+    }
+    fn selected_index(&self) -> Option<usize> {
+        selection_from(unsafe { ffi::SendMessageW(self.base.hwnd, ffi::CB_GETCURSEL, 0, 0) })
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        set_change_handler(self.base.hwnd, callback);
+    }
+}
+
+pub(crate) struct Win32ListBoxHandle { base: Win32Widget, items: RefCell<Vec<String>> }
+impl_widget_handle!(Win32ListBoxHandle, base);
+impl ListBoxHandle for Win32ListBoxHandle {
+    fn set_items(&self, items: &[String]) {
+        *self.items.borrow_mut() = items.to_vec();
+        unsafe {
+            ffi::SendMessageW(self.base.hwnd, ffi::LB_RESETCONTENT, 0, 0);
+            for item in items {
+                let wide = to_wide(item);
+                ffi::SendMessageW(self.base.hwnd, ffi::LB_ADDSTRING, 0, wide.as_ptr() as isize);
+            }
+        }
+    }
+    fn items(&self) -> Vec<String> {
+        self.items.borrow().clone()
+    }
+    fn set_selected_index(&self, index: Option<usize>) {
+        let wparam = selection_wparam(index, self.items.borrow().len());
+        unsafe { ffi::SendMessageW(self.base.hwnd, ffi::LB_SETCURSEL, wparam, 0) };
+    }
+    fn selected_index(&self) -> Option<usize> {
+        selection_from(unsafe { ffi::SendMessageW(self.base.hwnd, ffi::LB_GETCURSEL, 0, 0) })
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        set_change_handler(self.base.hwnd, callback);
+    }
+}
+
 thread_local! {
     // No native getter for a `STATIC`'s `STM_SETIMAGE` path, so this
     // crate's own record is the only one — same reasoning as
@@ -820,7 +1016,7 @@ fn init_common_controls_once() {
     COMMON_CONTROLS.call_once(|| unsafe {
         let icc = ffi::InitCommonControlsExStruct {
             dw_size: std::mem::size_of::<ffi::InitCommonControlsExStruct>() as u32,
-            dw_icc: ffi::ICC_PROGRESS_CLASS | ffi::ICC_TREEVIEW_CLASSES,
+            dw_icc: ffi::ICC_PROGRESS_CLASS | ffi::ICC_TREEVIEW_CLASSES | ffi::ICC_BAR_CLASSES,
         };
         ffi::InitCommonControlsEx(&icc);
     });
@@ -955,9 +1151,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: ffi::WPARAM, lpa
             ffi::WM_COMMAND => {
                 let child = lparam as HWND;
                 if !child.is_null() {
-                    fire_click(child);
+                    let is_selection_control =
+                        SELECTION_CONTROLS.with(|set| set.borrow().contains(&hwnd_key(child)));
+                    if is_selection_control {
+                        // Only "selection changed" is a user action; the other
+                        // notification codes are focus and drop-down chatter.
+                        if (wparam >> 16) & 0xFFFF == ffi::SELCHANGE {
+                            fire_change(child);
+                            fire_click(child);
+                        }
+                    } else {
+                        fire_click(child);
+                    }
                 }
                 ffi::DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            ffi::WM_HSCROLL => {
+                // A trackbar reports every move (drag, keys, page clicks) here.
+                let child = lparam as HWND;
+                if !child.is_null() {
+                    fire_change(child);
+                }
+                0
             }
             ffi::WM_LBUTTONDOWN => {
                 fire_click(hwnd);
@@ -1114,6 +1329,15 @@ impl Host for Win32Window {
     }
     fn create_timer(&self) -> Box<dyn TimerHandle> {
         create_timer(self.hwnd)
+    }
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
+        create_track_bar(self.hwnd)
+    }
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
+        create_combo_box(self.hwnd)
+    }
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
+        create_list_box(self.hwnd)
     }
 }
 

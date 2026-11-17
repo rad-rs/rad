@@ -8,14 +8,17 @@ mod window;
 pub use window::{WebBackend, WebWindow};
 
 use rad_core::{
-    ButtonHandle, CheckBoxHandle, Color, Host, LabelHandle, OsSkin, PictureBoxHandle,
-    ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle, TreeViewHandle, WidgetHandle,
+    ButtonHandle, CheckBoxHandle, Color, ComboBoxHandle, Host, LabelHandle, ListBoxHandle, OsSkin,
+    PictureBoxHandle, ProgressBarHandle, RadioButtonHandle, TextBoxHandle, TimerHandle,
+    TrackBarHandle, TreeViewHandle, WidgetHandle,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, Element, HtmlElement, HtmlInputElement, MouseEvent, PointerEvent};
+use web_sys::{
+    Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement, MouseEvent, PointerEvent,
+};
 
 fn skin_class(skin: OsSkin) -> &'static str {
     match skin {
@@ -106,6 +109,18 @@ impl Host for WebHost {
 
     fn create_timer(&self) -> Box<dyn TimerHandle> {
         Box::new(WebTimerHandle::new())
+    }
+
+    fn create_track_bar(&self) -> Box<dyn TrackBarHandle> {
+        Box::new(WebTrackBarHandle::new(new_track_bar_element(&self.document, &self.container)))
+    }
+
+    fn create_combo_box(&self) -> Box<dyn ComboBoxHandle> {
+        Box::new(WebSelectHandle::new(create_element(&self.document, &self.container, "select")))
+    }
+
+    fn create_list_box(&self) -> Box<dyn ListBoxHandle> {
+        Box::new(WebSelectHandle::new(new_list_box_element(&self.document, &self.container)))
     }
 }
 
@@ -504,6 +519,186 @@ impl Drop for WebTimerHandle {
             let closure = std::mem::replace(&mut self.closure, Closure::wrap(Box::new(|| {}) as Box<dyn FnMut()>));
             closure.forget();
         }
+    }
+}
+
+// --- TrackBar / ComboBox / ListBox ---
+
+/// Attaches `callback` as the element's `event` listener, replacing (and
+/// detaching) whatever `slot` held before, so setting a handler twice leaves
+/// exactly one listener behind.
+fn el_set_listener(
+    el: &HtmlElement,
+    event: &str,
+    slot: &RefCell<Option<Closure<dyn FnMut()>>>,
+    mut callback: Box<dyn FnMut()>,
+) {
+    let closure = Closure::wrap(Box::new(move || callback()) as Box<dyn FnMut()>);
+    if let Some(old) = slot.borrow_mut().replace(closure) {
+        el.remove_event_listener_with_callback(event, old.as_ref().unchecked_ref()).ok();
+    }
+    if let Some(new) = slot.borrow().as_ref() {
+        el.add_event_listener_with_callback(event, new.as_ref().unchecked_ref()).ok();
+    }
+}
+
+fn new_track_bar_element(document: &Document, parent: &Element) -> HtmlElement {
+    let el = create_element(document, parent, "input");
+    el.set_attribute("type", "range").ok();
+    el.set_attribute("min", "0").ok();
+    el.set_attribute("max", "100").ok();
+    el.set_attribute("value", "0").ok();
+    el
+}
+
+fn new_list_box_element(document: &Document, parent: &Element) -> HtmlElement {
+    let el = create_element(document, parent, "select");
+    // `size` > 1 turns a `<select>` into a scrolling list.
+    el.set_attribute("size", "5").ok();
+    el
+}
+
+pub(crate) struct WebTrackBarHandle {
+    el: HtmlElement,
+    on_change: RefCell<Option<Closure<dyn FnMut()>>>,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebTrackBarHandle {
+    pub(crate) fn new(el: HtmlElement) -> Self {
+        Self { el, on_change: RefCell::new(None), _drag: None }
+    }
+
+    pub(crate) fn new_draggable(el: HtmlElement) -> Self {
+        let drag = attach_drag(&el);
+        Self { el, on_change: RefCell::new(None), _drag: Some(drag) }
+    }
+
+    fn input(&self) -> &HtmlInputElement {
+        self.el.unchecked_ref()
+    }
+
+    fn attr_i32(&self, name: &str, default: i32) -> i32 {
+        self.el.get_attribute(name).and_then(|v| v.parse().ok()).unwrap_or(default)
+    }
+}
+
+impl_widget_handle!(WebTrackBarHandle, el);
+
+impl TrackBarHandle for WebTrackBarHandle {
+    fn set_minimum(&self, minimum: i32) {
+        self.el.set_attribute("min", &minimum.to_string()).ok();
+    }
+    fn minimum(&self) -> i32 {
+        self.attr_i32("min", 0)
+    }
+    fn set_maximum(&self, maximum: i32) {
+        self.el.set_attribute("max", &maximum.to_string()).ok();
+    }
+    fn maximum(&self) -> i32 {
+        self.attr_i32("max", 100)
+    }
+    fn set_value(&self, value: i32) {
+        // The browser clamps a range input to its min/max itself.
+        self.input().set_value(&value.to_string());
+    }
+    fn value(&self) -> i32 {
+        self.input().value().parse().unwrap_or(0)
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        // `input` fires continuously while dragging; `change` only on release.
+        el_set_listener(&self.el, "input", &self.on_change, callback);
+    }
+}
+
+/// Backs both `ComboBox` (a drop-down `<select>`) and `ListBox` (a `<select>`
+/// with `size`): they differ only in how the element is created.
+pub(crate) struct WebSelectHandle {
+    el: HtmlElement,
+    items: RefCell<Vec<String>>,
+    on_change: RefCell<Option<Closure<dyn FnMut()>>>,
+    _drag: Option<[Closure<dyn FnMut(PointerEvent)>; 3]>,
+}
+
+impl WebSelectHandle {
+    pub(crate) fn new(el: HtmlElement) -> Self {
+        Self { el, items: RefCell::new(Vec::new()), on_change: RefCell::new(None), _drag: None }
+    }
+
+    pub(crate) fn new_draggable(el: HtmlElement) -> Self {
+        let drag = attach_drag(&el);
+        Self { el, items: RefCell::new(Vec::new()), on_change: RefCell::new(None), _drag: Some(drag) }
+    }
+
+    fn select(&self) -> &HtmlSelectElement {
+        self.el.unchecked_ref()
+    }
+
+    fn fill(&self, items: &[String]) {
+        *self.items.borrow_mut() = items.to_vec();
+        self.el.set_text_content(None);
+        let document = self.el.owner_document().expect("el has a document");
+        for item in items {
+            if let Ok(option) = document.create_element("option") {
+                option.set_text_content(Some(item));
+                self.el.append_child(&option).ok();
+            }
+        }
+        // Like the native controls, a fresh list starts with nothing selected
+        // (browsers would otherwise preselect the first option of a combo).
+        self.select().set_selected_index(-1);
+    }
+
+    fn set_index(&self, index: Option<usize>) {
+        let len = self.items.borrow().len();
+        let value = match index {
+            Some(i) if i < len => i as i32,
+            _ => -1,
+        };
+        self.select().set_selected_index(value);
+    }
+
+    fn index(&self) -> Option<usize> {
+        let i = self.select().selected_index();
+        if i < 0 { None } else { Some(i as usize) }
+    }
+}
+
+impl_widget_handle!(WebSelectHandle, el);
+
+impl ComboBoxHandle for WebSelectHandle {
+    fn set_items(&self, items: &[String]) {
+        self.fill(items);
+    }
+    fn items(&self) -> Vec<String> {
+        self.items.borrow().clone()
+    }
+    fn set_selected_index(&self, index: Option<usize>) {
+        self.set_index(index);
+    }
+    fn selected_index(&self) -> Option<usize> {
+        self.index()
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        el_set_listener(&self.el, "change", &self.on_change, callback);
+    }
+}
+
+impl ListBoxHandle for WebSelectHandle {
+    fn set_items(&self, items: &[String]) {
+        self.fill(items);
+    }
+    fn items(&self) -> Vec<String> {
+        self.items.borrow().clone()
+    }
+    fn set_selected_index(&self, index: Option<usize>) {
+        self.set_index(index);
+    }
+    fn selected_index(&self) -> Option<usize> {
+        self.index()
+    }
+    fn set_on_change(&self, callback: Box<dyn FnMut()>) {
+        el_set_listener(&self.el, "change", &self.on_change, callback);
     }
 }
 

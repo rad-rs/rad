@@ -16,5 +16,5 @@ version = "0.3.72"
 features = [
     "Document", "Element", "HtmlElement", "CssStyleDeclaration", "DomTokenList", "Window",
     "ResizeObserver", "ResizeObserverEntry", "ResizeObserverBoxOptions", "DomRectReadOnly",
-    "PointerEvent", "EventTarget", "HtmlHeadElement", "HtmlInputElement", "MouseEvent",
+    "PointerEvent", "EventTarget", "HtmlHeadElement", "HtmlInputElement", "HtmlSelectElement", "MouseEvent",
 ]

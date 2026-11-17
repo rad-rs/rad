@@ -16,6 +16,9 @@ const KIND_RADIO_BUTTON = 4;
 const KIND_PROGRESS_BAR = 5;
 const KIND_PICTURE_BOX = 6;
 const KIND_TREE_VIEW = 7;
+const KIND_TRACK_BAR = 8;
+const KIND_COMBO_BOX = 9;
+const KIND_LIST_BOX = 10;
 
 function readString(memory, ptr, len) {
   return new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, ptr, len));
@@ -166,6 +169,20 @@ export async function runApp(wasmBytes, root) {
           dom = document.createElement("div");
           dom.style.cssText += "overflow:auto; border:1px solid #adadad; background:#fff;";
           break;
+        case KIND_TRACK_BAR:
+          dom = document.createElement("input");
+          dom.type = "range";
+          dom.min = 0;
+          dom.max = 100;
+          dom.value = 0;
+          break;
+        case KIND_COMBO_BOX:
+          dom = document.createElement("select");
+          break;
+        case KIND_LIST_BOX:
+          dom = document.createElement("select");
+          dom.size = 5; // size > 1 makes a <select> a scrolling list
+          break;
         default:
           dom = document.createElement("div");
       }
@@ -295,6 +312,48 @@ export async function runApp(wasmBytes, root) {
     rad_timer_destroy(id) {
       if (timers[id] !== null) clearInterval(timers[id]);
       timers[id] = null;
+    },
+
+    // Trackbar value/range (signed, unlike rad_set_value).
+    rad_set_int_value(id, value) {
+      elements[id].dom.value = value;
+    },
+    rad_get_int_value(id) {
+      return Number(elements[id].dom.value) | 0;
+    },
+    rad_set_range(id, minimum, maximum) {
+      elements[id].dom.min = minimum;
+      elements[id].dom.max = maximum;
+    },
+
+    // Combo / list boxes: one item per line, like rad_set_tree_items.
+    rad_set_list_items(id, ptr, len) {
+      const dom = elements[id].dom;
+      dom.textContent = "";
+      if (len > 0) {
+        for (const line of readString(memory, ptr, len).split("\n")) {
+          const option = document.createElement("option");
+          option.textContent = line;
+          dom.appendChild(option);
+        }
+      }
+      // Like the native controls, a fresh list starts with nothing selected.
+      dom.selectedIndex = -1;
+    },
+    rad_set_selected_index(id, index) {
+      elements[id].dom.selectedIndex = index;
+    },
+    rad_get_selected_index(id) {
+      return elements[id].dom.selectedIndex;
+    },
+    // A trackbar reports while dragging ("input"); a list when a different
+    // item is picked ("change"). Both only for user actions.
+    rad_register_change(id, callbackId) {
+      const el = elements[id];
+      const event = el.kind === KIND_TRACK_BAR ? "input" : "change";
+      if (el.changeListener) el.dom.removeEventListener(event, el.changeListener);
+      el.changeListener = () => instance.exports.rad_dispatch_change(callbackId);
+      el.dom.addEventListener(event, el.changeListener);
     },
 
     rad_set_fore_color(id, hasColor, r, g, b) {
