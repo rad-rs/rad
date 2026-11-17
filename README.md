@@ -6,12 +6,26 @@ A rapid-application-development (RAD) framework and visual designer for Rust: dr
 
 | Crate | Role |
 |---|---|
-| `rad-core` | Widget model (`Window`, `Button`, `Label`, `CheckBox`, `TextBox`, `RadioButton`, `ProgressBar`, `PictureBox`, `TreeView`) and the `Backend` trait. |
+| `rad-core` | Widget model and the `Backend` trait. See [Components](#components). |
 | `rad-backend-win32` | Native Win32 backend. No external dependencies (hand-declared WinAPI), so the same source builds with Cargo and as plain mounted source in the designer's in-browser pipeline. |
 | `rad-backend-web` | Browser backend built on `wasm-bindgen`/`web-sys`. Used by the designer itself. |
 | `rad-backend-web-min` | Browser backend with no `wasm-bindgen`, driven by a small JS shim (`runtime.js`). Used for apps compiled by the in-browser pipeline. |
 | `rad-demo`, `rad-demo-native` | A form built on the browser backend, and one built on the Win32 backend. |
 | `rad-designer` | The visual designer (runs in the browser, built with `trunk`). |
+
+## Components
+
+| Component | Notes |
+|---|---|
+| `Button`, `Label`, `CheckBox`, `TextBox`, `RadioButton` | Text controls. |
+| `ProgressBar`, `PictureBox`, `TreeView` | Display controls. |
+| `TrackBar` | Slider with `minimum`, `maximum` (0 to 100 by default) and `value`. |
+| `ComboBox`, `ListBox` | Items plus a selected index (`None` for no selection); `text()` returns the selected item. |
+| `Timer` | **Non-visual.** `set_interval(ms)`, `set_enabled(bool)` (or `start()`/`stop()`) and `set_on_tick`. Disabled until enabled, 100 ms by default. |
+
+`TrackBar`, `ComboBox` and `ListBox` raise `set_on_change`, fired when the user changes them (not when code does). A `Timer` has no place on the form: in the designer it appears as a chip in a component tray below the form, and double-clicking it stubs out its `tick` handler.
+
+All of them are implemented in every backend (Win32, web, web-min) and are available in the designer's toolbox.
 
 ## Build
 
