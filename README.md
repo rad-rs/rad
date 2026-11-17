@@ -46,7 +46,7 @@ All of `rad-core` and the backend are mounted as sibling `mod` files of a single
 
 ### Toolchain is not in this repo
 
-The native `.exe` build needs a patched wasm-hosted `rustc` plus a Windows standard library and MinGW runtime per architecture, expected under `crates/rad-designer/native-toolchain/` (ignored by git):
+The native `.exe` build needs a patched wasm-hosted `rustc` plus a Windows standard library and MinGW runtime per architecture, expected under `crates/rad-designer/native-toolchain/` (ignored by git): Sizes (all uncompressed): the compiler is about 104 MB (`wasm-opt -Os` of a 132 MB build) and each target directory is about 103-110 MB, so about 423 MB for the three Windows targets. The browser downloads only the compiler and the selected target's files, and caches them (Cache Storage) after the first build; the compiler compresses to about 21 MB with brotli.
 
 ```
 native-toolchain/
