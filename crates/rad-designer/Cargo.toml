@@ -20,4 +20,5 @@ features = [
     "DragEvent", "DataTransfer", "HtmlTextAreaElement", "MouseEvent", "EventTarget", "DomTokenList",
     "PointerEvent", "HtmlInputElement", "Event", "Node", "HtmlSelectElement", "Storage",
     "HtmlCollection", "Blob", "Url", "HtmlAnchorElement", "BlobPropertyBag", "console", "Location",
+    "KeyboardEvent",
 ]

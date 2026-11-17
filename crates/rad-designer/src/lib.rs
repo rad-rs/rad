@@ -37,7 +37,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     Blob, BlobPropertyBag, Document, DragEvent, Element, Event, HtmlAnchorElement, HtmlElement,
-    HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement, MouseEvent, Node, PointerEvent, Url,
+    HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent, Node, PointerEvent,
+    Url,
 };
 
 /// Thin bindings to `monaco-bridge.js`, which drives real Monaco editor
@@ -1034,6 +1035,116 @@ fn mark_tray_selection(tray: &Element, selected: Option<&Element>) {
     }
 }
 
+/// A default name for a new control of `kind` (`button1`, `button2`, ...): the
+/// lowest number that no placed control uses and that `form1.rs` does not
+/// still refer to. The second rule matters after a delete: a handler stub for
+/// the removed control stays in `form1.rs`, and a new control that reused its
+/// name would silently inherit that handler.
+fn unique_name(kind: &str, controls: &[PlacedControl]) -> String {
+    let base = lowercase_first(kind);
+    let form1 = files::read("form1.rs").unwrap_or_default();
+    (1..)
+        .map(|n| format!("{base}{n}"))
+        .find(|name| !controls.iter().any(|c| &c.name == name) && !references_name(&form1, name))
+        .expect("an unbounded range always has a free name")
+}
+
+/// Whether `text` uses `.name` as a whole identifier, as the handler wiring
+/// does (`form.controls.button1.set_on_click(..)`), so `.button1` does not
+/// match inside `.button12`.
+fn references_name(text: &str, name: &str) -> bool {
+    let needle = format!(".{name}");
+    text.match_indices(&needle).any(|(at, _)| {
+        text[at + needle.len()..]
+            .chars()
+            .next()
+            .map_or(true, |c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
+/// Rewrites `form1.designer.rs` (and its editor tab) if the form no longer
+/// matches it. Run once a second, and right away after a delete.
+fn sync_designer_file(controls: &[PlacedControl]) {
+    let src = generate_designer_source(controls);
+    if files::read("form1.designer.rs").as_deref() != Some(src.as_str()) {
+        files::write("form1.designer.rs", &src);
+        monaco::set_content("form1.designer.rs", &src);
+    }
+}
+
+/// What deleting the selection needs to touch.
+struct DeleteCtx {
+    chrome: Document,
+    window: Rc<WebWindow>,
+    controls: Rc<RefCell<Vec<PlacedControl>>>,
+    selection: Rc<Cell<Selection>>,
+    inputs: Rc<PropertyInputs>,
+    form_overlay: HtmlElement,
+    control_overlay: HtmlElement,
+    tray: Element,
+}
+
+/// Removes the selected control or component. Returns whether anything was
+/// removed (nothing is when the form or nothing is selected).
+///
+/// Widgets do not remove their own DOM node when dropped (only a `Timer`
+/// stops its interval), so the control's element, or a component's tray chip,
+/// is removed here explicitly; dropping the `PlacedControl` afterwards then
+/// stops a timer.
+fn delete_selected(ctx: &DeleteCtx) -> bool {
+    let Selection::Control(index) = ctx.selection.get() else { return false };
+    let removed = {
+        let mut controls = ctx.controls.borrow_mut();
+        if index >= controls.len() {
+            return false;
+        }
+        controls.remove(index)
+    };
+    removed.element.remove();
+    let name = removed.name.clone();
+    drop(removed);
+
+    ctx.selection.set(Selection::None);
+    hide_overlay(&ctx.form_overlay);
+    hide_overlay(&ctx.control_overlay);
+    mark_tray_selection(&ctx.tray, None);
+    if ctx.tray.children().length() == 0 {
+        ctx.tray.class_list().remove_1("has-items").ok();
+    }
+    refresh_properties(&ctx.inputs, Selection::None, &ctx.window, &ctx.controls.borrow());
+    sync_designer_file(&ctx.controls.borrow());
+
+    // `form1.rs` is hand-written, so it is left alone; but a handler stub made
+    // for this control still wires it up (`form.controls.<name>...`), which
+    // will not compile any more. Say so now instead of at the next build.
+    if references_name(&files::read("form1.rs").unwrap_or_default(), &name) {
+        chrome_element::<HtmlElement>(&ctx.chrome, "build-status").set_text_content(Some(&format!(
+            "form1.rs still refers to {name}: remove its handler or the build will fail"
+        )));
+    }
+    true
+}
+
+/// A bare Delete: no Ctrl/Alt/Meta/Shift, and not part of an IME composition.
+fn is_plain_delete(e: &KeyboardEvent) -> bool {
+    e.key() == "Delete" && !(e.ctrl_key() || e.alt_key() || e.meta_key() || e.shift_key() || e.is_composing())
+}
+
+/// Whether a key event in the parent page came from somewhere the user is
+/// typing: a form field, an editable element or the Monaco editor (its
+/// hidden input is a textarea, but check its container too). The target is a
+/// parent-page node, so it is cast without a realm-checked `dyn_into`.
+fn is_typing_target(e: &KeyboardEvent) -> bool {
+    let Some(target) = e.target().map(|t| t.unchecked_into::<Node>()) else { return false };
+    if target.node_type() != Node::ELEMENT_NODE {
+        return false;
+    }
+    let element = target.unchecked_into::<Element>();
+    matches!(element.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+        || element.unchecked_ref::<HtmlElement>().is_content_editable()
+        || element.closest(".monaco-editor").ok().flatten().is_some()
+}
+
 fn parse_i32(input: &HtmlInputElement, fallback: i32) -> i32 {
     input.value().trim().parse().unwrap_or(fallback)
 }
@@ -1139,13 +1250,7 @@ pub fn start() {
 
     let on_regen_tick = {
         let controls = controls.clone();
-        Closure::wrap(Box::new(move || {
-            let src = generate_designer_source(&controls.borrow());
-            if files::read("form1.designer.rs").as_deref() != Some(src.as_str()) {
-                files::write("form1.designer.rs", &src);
-                monaco::set_content("form1.designer.rs", &src);
-            }
-        }) as Box<dyn FnMut()>)
+        Closure::wrap(Box::new(move || sync_designer_file(&controls.borrow())) as Box<dyn FnMut()>)
     };
     dom_window
         .set_interval_with_callback_and_timeout_and_arguments_0(
@@ -1323,6 +1428,52 @@ pub fn start() {
     tray.add_event_listener_with_callback("dblclick", on_tray_dblclick.as_ref().unchecked_ref()).ok();
     on_tray_dblclick.forget();
 
+    // Delete removes the selected control or component. Key events do not
+    // cross the iframe boundary, so listen in both documents: the preview's
+    // (focus on the form surface or a selected control) and the parent page's
+    // (focus on the page, the palette or a button). In the parent page a
+    // Delete aimed at a text field or the code editor must keep editing text,
+    // and nothing happens while the code tabs hide the designer. Inside the
+    // preview every element is part of the design surface, so Delete always
+    // means "remove the selection" there.
+    let delete_ctx = Rc::new(DeleteCtx {
+        chrome: chrome.clone(),
+        window: window.clone(),
+        controls: controls.clone(),
+        selection: selection.clone(),
+        inputs: inputs.clone(),
+        form_overlay: form_overlay.clone(),
+        control_overlay: control_overlay.clone(),
+        tray: tray.clone(),
+    });
+    let on_preview_keydown = {
+        let ctx = delete_ctx.clone();
+        Closure::wrap(Box::new(move |e: KeyboardEvent| {
+            if is_plain_delete(&e) && delete_selected(&ctx) {
+                e.prevent_default();
+            }
+        }) as Box<dyn FnMut(KeyboardEvent)>)
+    };
+    preview
+        .add_event_listener_with_callback("keydown", on_preview_keydown.as_ref().unchecked_ref())
+        .ok();
+    on_preview_keydown.forget();
+    let on_chrome_keydown = {
+        let ctx = delete_ctx.clone();
+        let refs = refs.clone();
+        Closure::wrap(Box::new(move |e: KeyboardEvent| {
+            let designer_visible =
+                refs.designer_view.style().get_property_value("display").ok().as_deref() != Some("none");
+            if is_plain_delete(&e) && designer_visible && !is_typing_target(&e) && delete_selected(&ctx) {
+                e.prevent_default();
+            }
+        }) as Box<dyn FnMut(KeyboardEvent)>)
+    };
+    chrome
+        .add_event_listener_with_callback("keydown", on_chrome_keydown.as_ref().unchecked_ref())
+        .ok();
+    on_chrome_keydown.forget();
+
     // Allow drop: the body — and, per spec, dragenter too — must cancel
     // the default, or "drop" never fires.
     let on_dragover = Closure::wrap(Box::new(move |e: DragEvent| {
@@ -1356,8 +1507,7 @@ pub fn start() {
             let x = e.offset_x() - grab_x;
             let y = e.offset_y() - grab_y;
 
-            let same_kind_count = controls.borrow().iter().filter(|c| c.control.kind_name() == kind).count();
-            let name = format!("{}{}", lowercase_first(&kind), same_kind_count + 1);
+            let name = unique_name(&kind, &controls.borrow());
 
             let Some(mut control) = PlacedKind::new(&kind, &window, &name) else {
                 return;
