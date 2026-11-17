@@ -3,7 +3,7 @@
 //! compiled only where it applies, and exports a `Parent`: what a component
 //! needs from its host to create a control.
 //!
-//! The platform is chosen by one of the `rad_win32`, `rad_web` and `rad_web_min`
+//! The platform is chosen by one of the `rad_win32`, `rad_gtk`, `rad_web` and `rad_web_min`
 //! cfgs. Under Cargo, `build.rs` sets them from the target and the `web` /
 //! `web-min` features; the designer's in-browser pipeline, which has no Cargo,
 //! passes `--cfg` to rustc itself.
@@ -17,6 +17,11 @@ pub mod win32;
 #[cfg(rad_win32)]
 pub use win32::Parent;
 
+#[cfg(rad_gtk)]
+pub mod gtk;
+#[cfg(rad_gtk)]
+pub use gtk::Parent;
+
 #[cfg(rad_web)]
 pub mod web;
 #[cfg(rad_web)]
@@ -27,7 +32,7 @@ pub mod web_min;
 #[cfg(rad_web_min)]
 pub use web_min::Parent;
 
-#[cfg(not(any(rad_win32, rad_web, rad_web_min)))]
+#[cfg(not(any(rad_win32, rad_gtk, rad_web, rad_web_min)))]
 compile_error!(
-    "rad-core has no platform for this target: build for Windows, or for wasm32 with the `web` or `web-min` feature"
+    "rad-core has no platform for this target: build for Windows or Linux, or for wasm32 with the `web` or `web-min` feature"
 );

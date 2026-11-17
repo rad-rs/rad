@@ -21,7 +21,7 @@ fn main() {
 /// Picks the platform components are compiled for. `web` wins over `web-min` if
 /// both features are on (Cargo unifies features across a workspace build).
 fn emit_platform_cfg() {
-    for cfg in ["rad_win32", "rad_web", "rad_web_min", "rad_macos"] {
+    for cfg in ["rad_win32", "rad_gtk", "rad_web", "rad_web_min", "rad_macos"] {
         println!("cargo::rustc-check-cfg=cfg({cfg})");
     }
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -29,6 +29,8 @@ fn emit_platform_cfg() {
     let feature = |name: &str| std::env::var_os(format!("CARGO_FEATURE_{name}")).is_some();
     if os == "windows" {
         println!("cargo:rustc-cfg=rad_win32");
+    } else if os == "linux" {
+        println!("cargo:rustc-cfg=rad_gtk");
     } else if arch == "wasm32" && feature("WEB") {
         println!("cargo:rustc-cfg=rad_web");
     } else if arch == "wasm32" && feature("WEB_MIN") {
