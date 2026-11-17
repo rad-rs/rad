@@ -74,6 +74,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rad-backend-gtk"
+version = "0.1.0"
+dependencies = [
+ "rad-core",
+]
+
+[[package]]
 name = "rad-backend-web"
 version = "0.1.0"
 dependencies = [
@@ -114,6 +121,14 @@ dependencies = [
  "rad-core",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "rad-demo-linux"
+version = "0.1.0"
+dependencies = [
+ "rad-backend-gtk",
+ "rad-core",
 ]
 
 [[package]]

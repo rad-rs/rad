@@ -2,16 +2,21 @@
 //! `rad-demo` shows in the browser, on `rad-backend-win32`. No WASM, no
 //! browser, just a normal `cargo build` producing a real `.exe`. The
 //! backend only creates the window; running it needs the usual Win32
-//! message loop, which this entry point owns.
+//! message loop, which this entry point owns. (On other OSes this is an
+//! empty program, so a workspace build there is unaffected; Linux has
+//! `rad-demo-linux`.)
 
+#[cfg(target_os = "windows")]
 #[path = "../../rad-demo/src/form1.rs"]
 mod form1;
 
+#[cfg(target_os = "windows")]
 use rad_core::Window;
 
 // The backend has no external dependencies, so the message loop is declared
 // by hand too. `MSG` is 48 bytes; `[usize; 7]` (56) is correctly aligned and
 // large enough, since the OS only writes within the real struct's bounds.
+#[cfg(target_os = "windows")]
 #[link(name = "user32")]
 unsafe extern "system" {
     fn GetMessageW(msg: *mut [usize; 7], hwnd: *mut core::ffi::c_void, min: u32, max: u32) -> i32;
@@ -19,6 +24,7 @@ unsafe extern "system" {
     fn DispatchMessageW(msg: *const [usize; 7]) -> isize;
 }
 
+#[cfg(target_os = "windows")]
 fn main() {
     let backend = rad_backend_win32::Win32Backend;
     let window = Window::new(&backend, "All controls demo", 460, 520);
@@ -34,4 +40,9 @@ fn main() {
 
     std::mem::forget(controls);
     std::mem::forget(window);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn main() {
+    eprintln!("rad-demo-native runs on Windows only; on Linux use rad-demo-linux");
 }

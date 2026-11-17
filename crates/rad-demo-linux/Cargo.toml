@@ -1,0 +1,12 @@
+[package]
+name = "rad-demo-linux"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rad-demo-linux"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rad-core = { path = "../rad-core" }
+rad-backend-gtk = { path = "../rad-backend-gtk" }

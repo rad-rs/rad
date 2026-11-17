@@ -5,8 +5,10 @@ members = [
     "crates/rad-backend-web",
     "crates/rad-backend-web-min",
     "crates/rad-backend-win32",
+    "crates/rad-backend-gtk",
     "crates/rad-demo",
     "crates/rad-demo-native",
+    "crates/rad-demo-linux",
     "crates/rad-designer",
 ]
 

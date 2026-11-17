@@ -7,6 +7,8 @@
 //! has no way to fetch crates or produce `.rlib`s.
 
 
+#![cfg(target_os = "windows")]
+
 use rad_core::platform::win32::{
     dpi_scale, ffi, set_click_handler, set_window_text, to_wide, window_text, Parent, HWND,
 };

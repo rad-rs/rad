@@ -7,6 +7,6 @@ edition.workspace = true
 name = "rad-demo-native"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
 rad-core = { path = "../rad-core" }
 rad-backend-win32 = { path = "../rad-backend-win32" }

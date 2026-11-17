@@ -1,0 +1,10 @@
+[package]
+name = "rad-backend-gtk"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+rad-core = { path = "../rad-core" }
