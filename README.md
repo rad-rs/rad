@@ -74,6 +74,30 @@ There are no crate dependencies: `rad-core/src/platform/gtk.rs` declares the han
 
 Controls sit on a `GtkFixed` for absolute positions, and colours are applied with a per-widget CSS provider. As on Win32, `set_on_change` handlers fire only for user changes, never for changes made by code. `TextBox::set_on_click` fires on Enter (a `GtkEntry` consumes mouse presses).
 
+
+### Targets
+
+The same three architectures as the Windows targets, all gnu/glibc:
+
+| Triple | Architecture | Runs on |
+|---|---|---|
+| `x86_64-unknown-linux-gnu` | x64 | native Linux, WSL2 + WSLg |
+| `i686-unknown-linux-gnu` | x86 | any x86_64 Linux with 32-bit execution enabled (the default on Debian) |
+| `aarch64-unknown-linux-gnu` | ARM64 | ARM64 Linux, or x86_64 Linux through `qemu-user-static` |
+
+Cross-building from x86_64 Debian/Ubuntu:
+
+```
+sudo dpkg --add-architecture i386 && sudo dpkg --add-architecture arm64 && sudo apt update
+sudo apt install libgtk-3-dev libgtk-3-dev:i386 libgtk-3-dev:arm64 gcc-i686-linux-gnu gcc-aarch64-linux-gnu
+scripts/build-linux-all.sh             # all three; or pass triples: scripts/build-linux-all.sh i686-unknown-linux-gnu
+```
+
+The script adds the rustup targets and sets the per-target linker through `CARGO_TARGET_*_LINKER` environment variables, so there is no `.cargo/config.toml` and the Windows and native builds are untouched. Under WSL, set `CARGO_TARGET_DIR` to a path on the Linux filesystem for speed.
+
+To run the foreign builds headless, install `xvfb xdotool imagemagick qemu-user-static` and use `scripts/verify-linux-xvfb.sh <i686|aarch64> <outdir>`, which starts Xvfb, runs the demo (aarch64 through `qemu-aarch64-static` with `QEMU_LD_PREFIX`/`LD_LIBRARY_PATH` pointing at the arm64 libraries), and screenshots the initial form, the timer ticking and the result of a Greet click.
+
+Verified (WSL2 Debian 13): x86_64 built and run under WSLg; i686 built (ELF32, Intel 80386) and run natively under Xvfb; aarch64 built (ELF64, AArch64) and run under qemu-user with the arm64 GTK 3 libraries on Xvfb. For i686 and aarch64 the initial render, the Greet click and the timer were exercised. Not verified: real ARM64 hardware (qemu-user only; timing and rendering performance untested), the 32-bit build on a non-x86 host, and any non-glibc (musl) target. The hand-declared FFI was audited for 32-bit: every `gulong`/`gsize`/`gssize`/`GType` is `c_ulong`/`usize`/`isize`, and the only struct layouts used (`GtkTreeIter`, `GdkRectangle`) are pointer/int sized per their C definitions; no change was needed.
 Not supported: in-browser Linux builds. The designer's **Target** selector has no Linux entry, and compiling a form to a Linux binary in the browser is out of scope (it would need a Linux std, a GTK link line and an ELF linker in the wasm toolchain). The designer's toolbox and generated code are unaffected: build the generated sources with Cargo on Linux.
 
 ## In-browser builds
